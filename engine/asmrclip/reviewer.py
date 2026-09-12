@@ -115,6 +115,37 @@ class Reviewer:
     def close(self):
         if self.recognizer:self.recognizer.close();self.recognizer=None
 
+    def inspect_chunk(self, pcm, identity):
+        """Reuse only an identical decoded chunk, with both coverage passes."""
+        length=len(pcm)/16000
+        groups=review_windows(length)
+        windows_checked=sum(map(len,groups))
+        # PCM includes splice gaps/decoder state, so a changed join cannot
+        # reuse source-based evidence. Times below remain local to this chunk.
+        digest=hashlib.sha256(pcm.tobytes()).hexdigest()
+        key=hashlib.sha256(json.dumps([identity,digest,len(pcm),groups]).encode()).hexdigest()
+        path=Path(self.cache)/'chunks'/(key+'.json') if self.cache else None
+        if path and path.exists():
+            try:cached=read_json(path)
+            except (OSError,ValueError):cached={}
+            if (cached.get('cache_key')==key and cached.get('windows_checked')==windows_checked
+                    and isinstance(cached.get('findings'),list)):
+                return cached['findings'],windows_checked,True
+        if self.recognizer is None:
+            from .recognition import Recognizer
+            self.recognizer=Recognizer(self.cfg)
+        audio=pcm.astype(np.float32)/32768
+        findings=[]
+        for clips in groups:
+            if not clips:continue
+            for s in self.recognizer.transcribe(audio,clips):
+                if not review_speech(s):continue
+                findings.append({'start':s['start'],'end':s['end'],'text':s['text'],
+                    'avg_logprob':s.get('avg_logprob'),'word_probability':sum(w.get('probability',0) for w in s['words'])/max(1,len(s['words'])) if s.get('backend')!='qwen3-asr' else None})
+        # Publish only after full coverage AND the boundary pass complete.
+        if path:save_json(path,{'cache_key':key,'windows_checked':windows_checked,'findings':findings})
+        return findings,windows_checked,False
+
     def inspect(self,path,export_report):
         pcm=decode_review_audio(path,export_report.get('timeline_review',False))
         duration=len(pcm)/16000
@@ -132,29 +163,28 @@ class Reviewer:
                 result=cached['review'];result['cache_reused']=True
                 event('log','复用同一音频帧内容与模型版本的完整成片复核。')
                 return result
-        findings=[];windows_checked=0
-        if self.recognizer is None:
-            from .recognition import Recognizer
-            self.recognizer=Recognizer(self.cfg)
+        findings=[];windows_checked=0;chunks_reused=0
+        # Keep the existing model/rule signature and add the execution device.
+        # Bump the chunk schema if transcription parameters or acceptance change.
+        chunk_identity=review_cache_key(Path(self.path),self.language,'review-chunks-1',0,16000,1)+':'+self.cfg['device']
         # Full timeline coverage plus an extra pass at inference boundaries.
         # Adjacent 300-second batches overlap by two seconds as well.
         for base in range(0,len(pcm),300*16000):
-            audio=pcm[base:min(len(pcm),base+302*16000)].astype(np.float32)/32768
-            length=len(audio)/16000
-            for clips in review_windows(length):
-                if not clips:continue
-                for s in self.recognizer.transcribe(audio,clips):
-                    if not review_speech(s):continue
-                    a=max(0,s['start']+base/16000);b=min(duration,s['end']+base/16000)
-                    if b>a:findings.append({'start':a,'end':b,'text':s['text'],
-                        'avg_logprob':s.get('avg_logprob'),'word_probability':sum(w.get('probability',0) for w in s['words'])/max(1,len(s['words'])) if s.get('backend')!='qwen3-asr' else None})
-                windows_checked+=len(clips)
+            chunk=pcm[base:min(len(pcm),base+302*16000)]
+            rows,count,reused=self.inspect_chunk(chunk,chunk_identity)
+            for s in rows:
+                a=max(0,s['start']+base/16000);b=min(duration,s['end']+base/16000)
+                if b>a:findings.append({**s,'start':a,'end':b})
+            windows_checked+=count
+            chunks_reused+=int(reused)
             event('progress',f'成片大模型复核：{min(duration,base/16000+300)/60:.1f} / {duration/60:.1f} 分钟',95+3*min(1,(base/16000+300)/duration))
         unique={(round(s['start'],2),round(s['end'],2),s['text']):s for s in findings}
         findings=sorted(unique.values(),key=lambda s:s['start'])
+        if chunks_reused:event('log',f'复用 {chunks_reused} 段音频内容完全一致的成片复核，包含边界检查。')
         from .model_catalog import VOICE_MODELS
         result={'status':'speech_found' if findings else 'passed','model':VOICE_MODELS[self.cfg['speech_model']]['name'],'model_path':self.path,
                 'scope':'decoded_candidate_full_timeline','duration':duration,'windows_checked':windows_checked,
+                'chunks_reused':chunks_reused,
                 'candidate_payload_sha256':export_report['payload_sha256'],'findings':findings,
                 'note':'检出达到阈值的疑似话语，需要重新剪辑复核。' if findings else '模型未检出达到话语阈值的残留，不等于人工听审或绝对无说话保证。'}
         if cached_path:save_json(cached_path,{'cache_key':key,'review':result})

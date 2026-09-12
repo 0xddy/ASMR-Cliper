@@ -81,8 +81,17 @@ def Recognizer(cfg):
 
 class WhisperRecognizer:
     def __init__(self, cfg):
+        self.cfg = dict(cfg)
+        self.model = self.pipe = None
+        self.batch_size=8 if cfg.get('speech_model')=='whisper-turbo' else 4
+        self.language = None if cfg['language'] == 'auto' else cfg['language']
+
+    def load(self):
+        if self.pipe is not None:
+            return
         from faster_whisper import WhisperModel, BatchedInferencePipeline
         import ctranslate2
+        cfg = self.cfg
         device = cfg['device']
         if device == 'auto':
             device = 'cuda' if ctranslate2.get_cuda_device_count() else 'cpu'
@@ -95,12 +104,11 @@ class WhisperRecognizer:
             event('log', 'GPU 初始化失败，改用 CPU 继续处理。')
             self.model = WhisperModel(cfg['whisper_model'], device='cpu', compute_type='int8', local_files_only=True)
         self.pipe = BatchedInferencePipeline(model=self.model)
-        self.batch_size=8 if cfg.get('speech_model')=='whisper-turbo' else 4
-        self.language = None if cfg['language'] == 'auto' else cfg['language']
 
     def transcribe(self, audio, clips, offset=0):
         if not clips:
             return []
+        self.load()
         segs, info = self.pipe.transcribe(audio, language=self.language, beam_size=5, batch_size=self.batch_size,
             word_timestamps=True, clip_timestamps=clips, condition_on_previous_text=False,
             temperature=0, max_new_tokens=160, no_repeat_ngram_size=3)
@@ -122,6 +130,7 @@ class WhisperRecognizer:
         return [cfg['whisper_model'],Path(cfg['whisper_model'],'model.bin').stat().st_mtime_ns,cfg['language'],2]
 
     def detect_language(self,audio):
+        self.load()
         language,probability,_=self.model.detect_language(audio,vad_filter=True,language_detection_segments=3)
         return language,f'（置信度 {probability:.0%}）'
 
@@ -133,6 +142,8 @@ class WhisperRecognizer:
         path = cache / f'speech-{token}.jsonl'
         rows = recover_jsonl(path)
         done = {r['offset'] for r in rows}
+        if rows:
+            event('log', f'复用 {len(done)} 段已完成的语音定位缓存。')
         if self.language is None:
             if rows:
                 self.language = rows[0]['language']
@@ -201,8 +212,8 @@ class WhisperRecognizer:
 class QwenRecognizer(WhisperRecognizer):
     LANGUAGES={'ko':'Korean','ja':'Japanese','zh':'Chinese','en':'English'}
     def __init__(self,cfg):
-        from .neural_client import NeuralClient
-        self.client=NeuralClient('qwen',cfg)
+        self.cfg=dict(cfg)
+        self.client=None
         self.language=None if cfg['language']=='auto' else cfg['language']
 
     def cache_identity(self,cfg):
@@ -212,6 +223,9 @@ class QwenRecognizer(WhisperRecognizer):
 
     def transcribe(self,audio,clips,offset=0):
         if not clips:return []
+        if self.client is None:
+            from .neural_client import NeuralClient
+            self.client=NeuralClient('qwen',self.cfg)
         result=self.client.request({'op':'transcribe','clips':clips,'language':self.LANGUAGES.get(self.language)},audio)
         for s in result:
             s['start']+=offset;s['end']+=offset

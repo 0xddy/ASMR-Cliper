@@ -7,6 +7,7 @@ import numpy as np
 from .common import event, read_json, save_json, merge, complement
 from .exclusions import summarize, strong_voice, airflow_events, supported_utterance, drinking_events, extend_breaks, laugh_kind, impact_events, rhythmic_events, KEEP_DEFAULTS
 from .extraction import extraction_regions
+from .acoustic_features import ast_features
 
 
 class Classifier:
@@ -37,11 +38,14 @@ class Classifier:
     def close(self):self.session=None
 
     def windows(self, windows):
-        from transformers.audio_utils import spectrogram
         wanted = [(float(a), float(b)) for a,b in windows]
         keys = [f'{a:.5f}:{b:.5f}' for a,b in wanted]
         pending = dict((key, pair) for key,pair in zip(keys, wanted) if key not in self.cached)
         jobs = list(pending.items())
+        # Boundary planning and retries often ask only for cached windows.
+        # Do not rewrite a multi-megabyte cache when nothing changed.
+        if not jobs:
+            return [self.cached[key] for key in keys]
         for offset in range(0, len(jobs), 8):
             arrays, live = [], []
             for key, (a,b) in jobs[offset:offset+8]:
@@ -49,12 +53,7 @@ class Classifier:
                 if len(audio) < 400 or np.sqrt(np.mean(audio*audio)) < 10**(-62/20):
                     self.cached[key] = {'start':a,'end':b,'quiet':True,**summarize({})}
                     continue
-                f = self.feature
-                fb = spectrogram(audio, f.window, frame_length=400, hop_length=160, fft_length=512, power=2.,
-                    center=False, preemphasis=.97, mel_filters=f.mel_filters, log_mel='log',
-                    mel_floor=1.192092955078125e-7, remove_dc_offset=True).T
-                fb = np.pad(fb, ((0,max(0,1024-len(fb))),(0,0)))[:1024]
-                arrays.append(f.normalize(fb).astype(np.float32))
+                arrays.append(ast_features(audio, self.feature))
                 live.append((key,a,b))
             if arrays:
                 if self.session is None:
@@ -67,9 +66,12 @@ class Classifier:
                 for (key,a,b),p in zip(live, probabilities):
                     scores = {self.labels[str(i)]:float(x) for i,x in enumerate(p)}
                     self.cached[key] = {'start':a,'end':b,'quiet':False,**summarize(scores)}
-            if offset and offset % 160 == 0:
-                event('log', f'声学上下文分析：{offset} / {len(jobs)} 个窗口')
-        save_json(self.path, {'model':self.identity,'windows':self.cached})
+            completed = min(offset+8, len(jobs))
+            if completed % 160 == 0 or completed == len(jobs):
+                # Atomic checkpoints survive cancellation during long scans.
+                save_json(self.path, {'model':self.identity,'windows':self.cached})
+                if len(jobs) >= 160:
+                    event('log', f'声学上下文分析：{completed} / {len(jobs)} 个窗口')
         return [self.cached[key] for key in keys]
 
     def music_intervals(self, duration):
