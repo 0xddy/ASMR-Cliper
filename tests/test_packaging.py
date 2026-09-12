@@ -176,7 +176,8 @@ class PackagingTests(unittest.TestCase):
 
     def test_path_guard_blocks_parent_directory(self):
         with self.assertRaises(ValueError): bundle.inside(self.root, '../outside')
-        self.assertEqual(bundle.inside(self.root, 'models/file.bin'), self.root / 'models/file.bin')
+        # inside() resolves Windows 8.3 aliases, which may appear in the runner's TEMP path.
+        self.assertEqual(bundle.inside(self.root, 'models/file.bin'), (self.root / 'models/file.bin').resolve())
 
     def test_snapshot_can_be_reused_without_staging_paths_or_private_files(self):
         self.put('models/asmr/weights.bin', b'model contents')
