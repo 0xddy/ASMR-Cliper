@@ -31,6 +31,7 @@ def inspect_media(source, output_kind='auto'):
         extension=(suffix if suffix in ('.mp4','.mov','.mkv','.webm') else '.mkv') if use_video else (
             '.m4a' if audio.codec_context.name=='aac' and audio.codec_context.profile=='LC' else '.mka')
         return {'kind':'video' if use_video else 'audio','extension':extension,
+                'input_has_video':video is not None,
                 'audio_index':audio.index,'video_index':video.index if use_video else None,
                 'audio_codec':audio.codec_context.name,
                 'audio_tracks':len(container.streams.audio),
@@ -75,9 +76,9 @@ def video_groups(source, index):
     return groups
 
 
-def align_video(source,index,intervals):
+def align_video(source,index,intervals,groups=None):
     event('progress','查找视频关键帧并向保留片段内部对齐',89)
-    groups=video_groups(source,index)
+    if groups is None:groups=video_groups(source,index)
     aligned=[];cursor=0
     for group in groups:
         while cursor<len(intervals) and intervals[cursor]['source_end']<group['end']-1e-7:
@@ -111,9 +112,10 @@ def stream_signature(stream):
     return result
 
 
-def copy_media_packets(source,destination,meta,frames,plan,media):
-    intervals=source_intervals(meta,frames,plan)
-    if media['kind']=='video':intervals=align_video(source,media['video_index'],intervals)
+def copy_media_packets(source,destination,meta,frames,plan,media,intervals=None):
+    if intervals is None:
+        intervals=source_intervals(meta,frames,plan)
+        if media['kind']=='video':intervals=align_video(source,media['video_index'],intervals)
     if not intervals:raise ValueError('没有可导出的片段。')
     # Map audio packets on the same source clock as the video, retaining only
     # complete packets inside accepted intervals. Gaps stay local to each join;

@@ -2,7 +2,6 @@ import csv
 import hashlib
 import os
 import shutil
-import subprocess
 import uuid
 from collections import deque
 from datetime import datetime
@@ -13,6 +12,7 @@ import av
 import numpy as np
 
 from .common import event, fingerprint, save_json
+from . import __version__
 from .exclusions import KEEP_DEFAULTS
 
 
@@ -130,11 +130,33 @@ def check_joins(path, report):
     return result
 
 
-def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, reviewer=None, allow_review_findings=False):
+def validate_decode(path, ffmpeg, report):
+    from .audio_source import run_ffmpeg
+    event('progress', '最终成片完整校验（限制解码线程）', 98)
+    command = [str(ffmpeg), '-hide_banner', '-v', 'error', '-xerror', '-nostdin', '-nostats',
+               '-progress', 'pipe:1', '-threads:v', '2', '-threads:a', '2',
+               '-filter_threads', '1', '-filter_complex_threads', '1', '-i', str(path),
+               '-map', '0:a:0', '-map', '0:v:0?', '-f', 'null', '-']
+    run_ffmpeg(command, '最终成片完整解码校验', report['duration'], (98, 99))
+
+
+def verify_reviewed_audio(reviewed, final):
+    # Final video must contain exactly the audio payload and clock that were reviewed.
+    if reviewed['payload_sha256'] != final['payload_sha256'] or reviewed['copied_packets'] != final['copied_packets']:
+        raise AssertionError('最终视频音轨与已复核音轨内容不一致。')
+    keys = ('source_start', 'source_end', 'output_start', 'output_end', 'analysis_start', 'analysis_end',
+            'audio_source_start', 'audio_source_end', 'audio_packets')
+    if (len(reviewed['mapping']) != len(final['mapping']) or
+            any(a[key] != b[key] for a, b in zip(reviewed['mapping'], final['mapping']) for key in keys)):
+        raise AssertionError('最终视频音轨与已复核音轨时间轴不一致。')
+
+
+def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, reviewer=None, allow_review_findings=False,
+           media_context=None):
     if not plan['keep_frames']:
         raise ValueError('当前规则下没有可保留的片段。请切换宽松模式或调小严格模式参数。')
-    from .media import inspect_media,copy_media_packets
-    media=inspect_media(source,cfg.get('output_kind','auto'))
+    from .media import inspect_media,copy_media_packets,align_video,source_intervals,video_groups
+    media=media_context if media_context is not None else inspect_media(source,cfg.get('output_kind','auto'))
     output_dir=Path(output_dir).resolve()
     output_dir.mkdir(parents=True,exist_ok=True)
     token=uuid.uuid4().hex[:8]
@@ -147,34 +169,53 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
     final_dir=output_dir/f'{name}_{mode}_{datetime.now():%Y%m%d_%H%M%S}_{token}'
     filename=f'{name}_ASMR_{mode}{media["extension"]}'
     try:
-        event('progress','复制原编码音视频包并校验内容' if media['kind']=='video' else '复制原音频包并校验内容',89)
-        if media['kind']=='audio' and meta.get('aac_packet_grid',meta['codec']=='AAC LC'):
+        candidate=None;intervals=None;report=None
+        if media['kind']=='video':
+            # Packet metadata only; cache the keyframe index across speech-review retries.
+            if '_video_groups' not in media:media['_video_groups']=video_groups(source,media['video_index'])
+            intervals=align_video(source,media['video_index'],source_intervals(meta,frames,plan),media['_video_groups'])
+            if reviewer is not None:
+                event('progress','按最终视频切点生成待复核音轨（不处理画面）',89)
+                candidate=staging/('audio-review'+media['extension'])
+                audio_media={**media,'kind':'audio','video_index':None,'video_codec':None}
+                report=copy_media_packets(source,candidate,meta,frames,plan,audio_media,intervals)
+        elif meta.get('aac_packet_grid',meta['codec']=='AAC LC'):
+            event('progress','复制原音频包并校验内容',89)
             report=copy_packets(source,staging/filename,meta,frames,plan)
             report['media_kind']='audio'
         else:report=copy_media_packets(source,staging/filename,meta,frames,plan,media)
-        event('progress','完整解码与拼接处波形检查',94)
-        run=subprocess.run([cfg['ffmpeg'],'-v','error','-xerror','-i',str(staging/filename),'-map','0:a:0','-map','0:v:0?','-f','null','-'],
-            stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
-        if run.returncode or run.stderr.strip():
-            raise RuntimeError('解码校验未通过：'+run.stderr.decode('utf-8',errors='replace')[-1500:])
-        report['joins']=check_timeline_joins(staging/filename,report) if report.get('timeline_review') else check_joins(staging/filename,report)
-        report['join_review_count']=sum(r['review_suggested'] for r in report['joins'])
         if reviewer is not None:
             from .reviewer import SpeechRemaining
-            report['speech_review']=reviewer.inspect(staging/filename,report)
-            report['speech_review']['export_mapping']=report['mapping']
-            if report['speech_review']['status']!='passed':
-                if allow_review_findings and cfg['mode']!='extract' and report['speech_review']['status']=='speech_found':
-                    report['speech_review']['status']='needs_review'
-                    report['speech_review']['note']='已达到设定复核轮数，仍有模型疑似话语；成片已保存，请按人声复核.csv 的位置复听。'
-                else:raise SpeechRemaining(report['speech_review'])
+            review=reviewer.inspect(candidate or staging/filename,report)
+            review['export_mapping']=report['mapping']
+            if review['status']!='passed':
+                if allow_review_findings and cfg['mode']!='extract' and review['status']=='speech_found':
+                    review['status']='needs_review'
+                    review['note']='已达到设定复核轮数，仍有模型疑似话语；成片已保存，请按人声复核.csv 的位置复听。'
+                else:raise SpeechRemaining(review)
         elif cfg.get('review_enabled',False) or cfg['mode']=='extract':
             raise RuntimeError('请求了成片复核，但复核模型未运行，不能发布结果。')
-        else:report['speech_review']={'status':'disabled'}
+        else:review={'status':'disabled'}
+        if media['kind']=='video':
+            event('progress','按已确认时间轴复制视频与音轨，合并封装',98)
+            final=copy_media_packets(source,staging/filename,meta,frames,plan,media,intervals)
+            if candidate is not None:
+                verify_reviewed_audio(report,final)
+                review['export_mapping']=final['mapping']
+                candidate.unlink()
+            report=final
+            report['audio_review_before_video_export']=candidate is not None
+        report['speech_review']=review
+        event('progress','检查最终音轨拼接处',98)
+        report['joins']=check_timeline_joins(staging/filename,report) if report.get('timeline_review') else check_joins(staging/filename,report)
+        report['join_review_count']=sum(r['review_suggested'] for r in report['joins'])
+        validate_decode(staging/filename,cfg['ffmpeg'],report)
+        report['decode_validation']={'scope':'final_output_only','video_threads':2,'audio_threads':2}
+        report['audio_preparation']=meta.get('audio_preparation',{'method':'cached_or_direct_audio_only'})
         report['speech_review']['previous_passes']=plan.get('review_passes',[])
         report.update(source=str(source.resolve()),mode=cfg['mode'],output=str(final_dir/filename),decode_verified=True,
                       language=plan.get('language','auto'),settings={k:cfg[k] for k in ['strict_pre','strict_post','strict_min_section','strict_dense_gap','silence_db','silence_seconds','audit']})
-        report['engine_version']='0.6.0'
+        report['engine_version']=__version__
         report['settings']['output_kind']=cfg.get('output_kind','auto')
         report['settings'].update(review_enabled=cfg.get('review_enabled',False),review_required=cfg['mode']=='extract',review_max_passes=cfg.get('review_max_passes',3))
         report['settings'].update(speech_model=cfg.get('speech_model','whisper-large-v3'),review_model_id=cfg.get('review_model_id','whisper-large-v3'))
@@ -195,7 +236,7 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
         review_status={'passed':'模型未检出残留话语','needs_review':'仍有疑似话语，待复听位置见人声复核.csv','disabled':'未开启'}[report['speech_review']['status']]
         video_note=(f"视频 {report['video_codec']} 原编码复制；关键帧向内调整额外剪去 {report['keyframe_trim_seconds']:.3f} 秒。\n"
                     f"视频包原样校验通过；音画使用同一时间轴，音轨边界留空最多 {report['max_audio_boundary_gap']*1000:.1f} 毫秒。\n") if media['kind']=='video' else ''
-        note=f'''ASMR-Cliper 0.6.0 · {title}
+        note=f'''ASMR-Cliper {__version__} · {title}
 时长：{clock(report['duration'])}；保留 {report['segments']} 段。
 {video_note}复制原 {report['codec']} 音频包，未重新编码。采样率 {report['sample_rate']} Hz；声道 {report['channels']}。
 保留帧 SHA-256 与包长度校验通过；完整解码检查通过。

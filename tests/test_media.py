@@ -15,7 +15,8 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'engine'))
 from asmrclip.analysis import analyze
 from asmrclip.common import settings,fingerprint
-from asmrclip.media import inspect_media,copy_media_packets,source_intervals
+from asmrclip.media import inspect_media,copy_media_packets,source_intervals,video_groups
+from asmrclip.exporter import validate_decode
 from asmrclip.exporter import export
 from asmrclip.reviewer import decode_review_audio,mapped_output_to_source,SpeechRemaining
 
@@ -155,11 +156,17 @@ class MediaExportTests(unittest.TestCase):
         with patch('asmrclip.model_catalog.validate_models'),patch('asmrclip.reviewer.validate_review_model'),\
              patch('asmrclip.recognition.Recognizer',return_value=recognizer),patch('asmrclip.classifier.Classifier',return_value=classifier),\
              patch('asmrclip.semantic.confirm',return_value={}),patch('asmrclip.reviewer.Reviewer',return_value=reviewer),\
-             patch('asmrclip.planner.make_plan',side_effect=make_plan):
+             patch('asmrclip.planner.make_plan',side_effect=make_plan),\
+             patch('asmrclip.media.video_groups',wraps=video_groups) as indexing,\
+             patch('asmrclip.media.copy_media_packets',wraps=copy_media_packets) as copying,\
+             patch('asmrclip.exporter.validate_decode',wraps=validate_decode) as validation:
             result=run(cfg)
         self.assertTrue(result['output'].endswith('.mp4'));self.assertEqual(result['speech_review']['status'],'passed')
         self.assertEqual(reviewer.calls,2);self.assertEqual(len(list((self.folder/'out').iterdir())),1)
         self.assertAlmostEqual(spoken[1][0][0],result['mapping'][0]['analysis_start']+.2)
+        self.assertEqual([c.args[5]['kind'] for c in copying.call_args_list],['audio','audio','video'])
+        self.assertEqual(indexing.call_count,1)
+        self.assertEqual(validation.call_count,1)
 
 
 if __name__=='__main__':unittest.main()

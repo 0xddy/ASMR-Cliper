@@ -55,7 +55,8 @@ def run(data):
         raise FileNotFoundError('请选择存在的音频或视频文件。')
     configure_dlls()
     from scipy.io import wavfile
-    from .analysis import analyze, inspect_audio
+    from .analysis import inspect_audio
+    from .audio_source import analyze_input_audio
     from .recognition import Recognizer
     from .classifier import Classifier
     from .planner import make_plan
@@ -74,7 +75,7 @@ def run(data):
     cache=Path(cfg['cache_dir'])/identity
     with cache_lock(cache):
         save_json(cache/'source.json',{'path':str(source),'fingerprint':identity})
-        meta,frames=analyze(source,cache)
+        meta,frames=analyze_input_audio(source,cache,cfg,media)
         recognizer=Recognizer(cfg)
         try:speech=recognizer.scan(cache/'analysis.wav',cfg,cache)
         finally:recognizer.close()
@@ -118,7 +119,8 @@ def run(data):
             plan['review_passes']=passes
             try:
                 report=export(source,cfg['output_dir'],meta,frames,plan,cfg,identity,reviewer,
-                              allow_review_findings=cfg['mode']!='extract' and attempt+1==cfg['review_max_passes'])
+                              allow_review_findings=cfg['mode']!='extract' and attempt+1==cfg['review_max_passes'],
+                              media_context=media)
                 break
             except SpeechRemaining as remaining:
                 audit=remaining.report
