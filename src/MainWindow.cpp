@@ -204,13 +204,18 @@ void MainWindow::readSoundSettings() {
     for(auto [id,key]:SoundOptions)cfg_[key]=SendMessageW(control(id),BM_GETCHECK,0,0)==BST_CHECKED;
 }
 void MainWindow::readFadeSettings() {
-    bool enabled=SendMessageW(control(FadeEnabled),BM_GETCHECK,0,0)==BST_CHECKED;
-    if(enabled) {
-        auto input=value(FadeSeconds);size_t used=0;double seconds=std::stod(input,&used);
-        if(used!=input.size()||!std::isfinite(seconds)||seconds<.05||seconds>2.)throw std::runtime_error("淡化时长须为 0.05 到 2 秒。");
-        cfg_["join_fade_seconds"]=seconds;
+    struct Fade {int toggle,field;const char* enabled;const char* seconds;double maximum;};
+    for(const auto& fade:std::vector<Fade>{{FadeEnabled,FadeSeconds,"join_fade_enabled","join_fade_seconds",2.},
+                                         {EdgeFadeEnabled,EdgeFadeSeconds,"edge_fade_enabled","edge_fade_seconds",3.}}) {
+        bool enabled=SendMessageW(control(fade.toggle),BM_GETCHECK,0,0)==BST_CHECKED;
+        if(enabled) {
+            auto input=value(fade.field);size_t used=0;double seconds=std::stod(input,&used);
+            if(used!=input.size()||!std::isfinite(seconds)||seconds<.05||seconds>fade.maximum)
+                throw std::runtime_error(fade.field==EdgeFadeSeconds?"首尾淡化时长须为 0.05 到 3 秒。":"接缝淡化时长须为 0.05 到 2 秒。");
+            cfg_[fade.seconds]=seconds;
+        }
+        cfg_[fade.enabled]=enabled;
     }
-    cfg_["join_fade_enabled"]=enabled;
 }
 void MainWindow::readModelSettings() {
     const std::vector<std::string> models{"whisper-large-v3","qwen3-asr","whisper-turbo"};
@@ -227,6 +232,8 @@ void MainWindow::readRecognitionSettings() {
     auto lang=static_cast<int>(SendMessageW(control(Language),CB_GETCURSEL,0,0)),device=static_cast<int>(SendMessageW(control(Device),CB_GETCURSEL,0,0));
     cfg_["language"]=languages.at(std::clamp(lang,0,4)); cfg_["device"]=devices.at(std::clamp(device,0,2));
     cfg_["review_enabled"]=cfg_.value("mode","")=="extract"||SendMessageW(control(Audit),BM_GETCHECK,0,0)==BST_CHECKED;
+    const std::vector<std::string> codecs{"source","flac","pcm","aac"};
+    cfg_["audio_output_codec"]=codecs.at(std::clamp(static_cast<int>(SendMessageW(control(AudioEncoding),CB_GETCURSEL,0,0)),0,3));
     cfg_["generate_program_menu"]=SendMessageW(control(MenuEnabled),BM_GETCHECK,0,0)==BST_CHECKED;
 }
 void MainWindow::readEditingSettings() {
@@ -659,12 +666,12 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
         if(id==RepairReview){environmentTask("install","review");return 0;}
         if(id>=RepairQwen&&id<=RepairNeural){const char* keys[]={"qwen","aligner","clap","neural"};environmentTask("install",keys[id-RepairQwen]);return 0;}
         if(id==TestProxy) {environmentTask("testproxy");return 0;}
-        if(id==ProxyEnabled||id==Audit||id==MenuEnabled||id==FadeEnabled||IsSoundOption(id)){
+        if(id==ProxyEnabled||id==Audit||id==MenuEnabled||id==FadeEnabled||id==EdgeFadeEnabled||IsSoundOption(id)){
             SendMessageW(control(id),BM_SETCHECK,SendMessageW(control(id),BM_GETCHECK,0,0)==BST_CHECKED?BST_UNCHECKED:BST_CHECKED,0);
             if(id==ProxyEnabled){proxyTested_=false;proxyResults_=json::array();proxyStatus_.clear();if(activeAction_=="testproxy")notice_=false;}
             enableControls(busy_);return 0;
         }
-        if(id==Language||id==Device||id==OutputKind){showChoices(id);return 0;}
+        if(id==Language||id==Device||id==OutputKind||id==AudioEncoding){showChoices(id);InvalidateRect(window_,nullptr,FALSE);return 0;}
         if(id==NewTask){selectPage(0);return 0;}
         if(id==Save) {
             const auto previous=cfg_;
@@ -679,8 +686,8 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
         if(id==Reset) {
             try {auto defaults=ReadJson(root_/L"config/defaults.json");
                 const std::vector<std::string> keys=settingsTab_==0?
-                    std::vector<std::string>{"max_pause_seconds","silence_db","strict_pre","strict_post","strict_min_section","strict_dense_gap","join_fade_enabled","join_fade_seconds"}:
-                    settingsTab_==1?std::vector<std::string>{"language","device","speech_model","review_model_id","whisper_model","review_model","review_enabled","generate_program_menu"}:
+                    std::vector<std::string>{"max_pause_seconds","silence_db","strict_pre","strict_post","strict_min_section","strict_dense_gap","join_fade_enabled","join_fade_seconds","edge_fade_enabled","edge_fade_seconds"}:
+                    settingsTab_==1?std::vector<std::string>{"language","device","speech_model","review_model_id","whisper_model","review_model","review_enabled","generate_program_menu","audio_output_codec"}:
                     std::vector<std::string>{"proxy_enabled","proxy_url"};
                 for(const auto& key:keys)cfg_[key]=defaults[key];
                 if(settingsTab_==0)for(auto option:SoundOptions)cfg_[option.second]=defaults[option.second];

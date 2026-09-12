@@ -99,15 +99,15 @@ class PauseExportTests(unittest.TestCase):
     def test_actual_audio_and_video_stay_within_configured_pause_limit_with_fades_on_or_off(self):
         for video in (False,True):
             source=self.source(video);meta,frames=analyze(source,self.folder/('video-cache' if video else 'audio-cache'))
-            for fade,limit,fade_time in ((False,1.5,.3),(True,1.5,.3),(True,.8,2)):
+            for fade,edge,limit,fade_time in ((False,False,1.5,.3),(False,True,1.5,.5),(True,True,1.5,.3),(True,True,.8,2)):
                 with self.subTest(video=video,fade=fade,limit=limit):
                     cfg=settings({'mode':'relaxed','review_enabled':False,'max_pause_seconds':limit,
-                                  'join_fade_enabled':fade,'join_fade_seconds':fade_time})
+                                  'join_fade_enabled':fade,'join_fade_seconds':fade_time,'edge_fade_enabled':edge,'edge_fade_seconds':fade_time})
                     plan=make_plan(meta,frames,{'spoken':[],'accepted':[]},[],cfg,Texture())
                     report=export(source,self.folder/'out',meta,frames,plan,cfg,fingerprint(source))
                     self.assertTrue(report['pause_check']['within_limit'],report['pause_check'])
                     self.assertLessEqual(self.independent_silence_check(report['output']),limit)
-                    self.assertEqual(report['payload_unchanged'],not fade)
+                    self.assertEqual(report['payload_unchanged'],not (fade or edge))
                     if video:self.assertTrue(report['video_payload_unchanged'])
                     self.assertTrue(report['decode_verified'])
                     self.assertEqual(report['settings']['max_pause_seconds'],limit)

@@ -90,7 +90,7 @@ class MediaExportTests(unittest.TestCase):
         source=self.folder/'audio.mp3'
         subprocess.run([str(FFMPEG),'-v','error','-f','lavfi','-i','sine=duration=12','-c:a','libmp3lame',str(source)],check=True)
         meta,frames,plan=self.plan(source)
-        report=export(source,self.folder/'out',meta,frames,plan,settings({'mode':'relaxed','review_enabled':False}),fingerprint(source))
+        report=export(source,self.folder/'out',meta,frames,plan,settings({'mode':'relaxed','review_enabled':False,'edge_fade_enabled':False}),fingerprint(source))
         self.assertTrue(report['output'].endswith('.mka'));self.assertTrue(report['payload_unchanged'])
         self.assertEqual(report['codec'],'mp3float')
 
@@ -100,7 +100,7 @@ class MediaExportTests(unittest.TestCase):
 
     def test_audio_output_from_video_preserves_old_aac_path(self):
         source=self.source();meta,frames,plan=self.plan(source)
-        cfg=settings({'mode':'relaxed','output_kind':'audio','review_enabled':False})
+        cfg=settings({'mode':'relaxed','output_kind':'audio','review_enabled':False,'edge_fade_enabled':False})
         report=export(source,self.folder/'out',meta,frames,plan,cfg,fingerprint(source))
         self.assertTrue(report['output'].endswith('.m4a'));self.assertTrue(report['payload_unchanged'])
         with av.open(report['output']) as result:self.assertEqual(len(result.streams.video),0)

@@ -85,6 +85,8 @@ def settings(data):
     cfg.pop('silence_seconds',None)
     if cfg.get('output_kind','auto') not in ('auto','audio','video'):
         raise ValueError('未知输出类型。')
+    if cfg.get('audio_output_codec','source') not in ('source','flac','pcm','aac'):
+        raise ValueError('未知输出音频编码。')
     from .model_catalog import required_components,voice_path
     required_components(cfg)
     if cfg.get('review_model_id')=='whisper-turbo':raise ValueError('成片复核请选择完整版 Whisper 或 Qwen。')
@@ -98,10 +100,11 @@ def settings(data):
     if not isinstance(cfg['review_enabled'],bool):raise ValueError('review_enabled 必须为布尔值。')
     if not isinstance(cfg['generate_program_menu'],bool):raise ValueError('generate_program_menu 必须为布尔值。')
     if not isinstance(cfg['join_fade_enabled'],bool):raise ValueError('join_fade_enabled 必须为布尔值。')
+    if not isinstance(cfg['edge_fade_enabled'],bool):raise ValueError('edge_fade_enabled 必须为布尔值。')
     if type(cfg['review_max_passes']) is not int or not 1<=cfg['review_max_passes']<=5:raise ValueError('复核轮数必须为 1 到 5 的整数。')
     for name, low, high in [('strict_pre', 0, 60), ('strict_post', 0, 60),
                             ('strict_min_section', 1, 600), ('strict_dense_gap', 0, 120),
-                            ('silence_db', -90, -20), ('max_pause_seconds', .3, 10), ('join_fade_seconds', .05, 2)]:
+                            ('silence_db', -90, -20), ('max_pause_seconds', .3, 10), ('join_fade_seconds', .05, 2), ('edge_fade_seconds', .05, 3)]:
         cfg[name] = float(cfg[name])
         if not low <= cfg[name] <= high:
             raise ValueError(f'{name} 超出允许范围 {low}..{high}')

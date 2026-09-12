@@ -15,6 +15,8 @@
   "generate_program_menu": true,
   "join_fade_enabled": false,
   "join_fade_seconds": 0.3,
+  "edge_fade_enabled": true,
+  "edge_fade_seconds": 0.5,
   "review_model": "models/whisper-review",
   "review_max_passes": 3,
   "keep_soft_laugh": true,
@@ -30,5 +32,6 @@
   "cache_dir": "runtime/cache",
   "proxy_enabled": true,
   "proxy_url": "http://127.0.0.1:10886",
-  "output_kind": "auto"
+  "output_kind": "auto",
+  "audio_output_codec": "source"
 }

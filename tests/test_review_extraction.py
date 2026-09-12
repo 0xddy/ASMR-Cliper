@@ -128,7 +128,7 @@ class ReviewExtractionTests(unittest.TestCase):
             flagged=export(source,out,meta,frames,plan,cfg,fingerprint(source),Reject(),allow_review_findings=True)
             self.assertEqual(flagged['speech_review']['status'],'needs_review')
             self.assertTrue(Path(flagged['output']).is_file())
-            self.assertTrue(flagged['payload_unchanged'])
+            self.assertFalse(flagged['payload_unchanged']);self.assertEqual(len(flagged['audio_fades']['edges']),2)
             self.assertTrue(flagged['decode_verified'])
             self.assertIn('hello',(Path(flagged['output']).parent/'人声复核.csv').read_text(encoding='utf-8-sig'))
             class Broken:
@@ -142,7 +142,7 @@ class ReviewExtractionTests(unittest.TestCase):
                     assert len(decode_review_audio(path))>1000
                     return {'status':'passed','findings':[],'candidate_payload_sha256':report['payload_sha256']}
             report=export(source,out,meta,frames,plan,cfg,fingerprint(source),Approve())
-            self.assertTrue(report['payload_unchanged'])
+            self.assertFalse(report['payload_unchanged']);self.assertEqual(len(report['audio_fades']['edges']),2)
             self.assertEqual(report['speech_review']['candidate_payload_sha256'],report['payload_sha256'])
             self.assertTrue(Path(report['output']).name.endswith('_v4.m4a'))
             cfg=settings({'mode':'relaxed'})
@@ -181,7 +181,7 @@ class ReviewExtractionTests(unittest.TestCase):
                          patch('asmrclip.planner.make_plan',side_effect=plans),contextlib.redirect_stdout(io.StringIO()) as output:
                         report=run(cfg)
                     self.assertTrue(Path(report['output']).is_file())
-                    self.assertTrue(report['payload_unchanged']);self.assertTrue(report['decode_verified'])
+                    self.assertFalse(report['payload_unchanged']);self.assertEqual(len(report['audio_fades']['edges']),2);self.assertTrue(report['decode_verified'])
                     self.assertEqual(report['speech_review']['status'],'needs_review')
                     self.assertEqual(report['speech_review']['candidate_payload_sha256'],report['payload_sha256'])
                     import json

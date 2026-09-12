@@ -127,7 +127,7 @@ void MainWindow::testDropdownIdle(HWND popup) {
 void MainWindow::testDropdowns() {
     // Exercise the real menu loop and keyboard messages; settings are never saved in tests.
     auto originalSettings=cfg_;
-    for(int id:{SpeechChoice,ReviewChoice,Language,Device,OutputKind}) {
+    for(int id:{SpeechChoice,ReviewChoice,Language,Device,OutputKind,AudioEncoding}) {
         if(id==OutputKind)selectPage(0);
         else {SendMessageW(control(Audit),BM_SETCHECK,BST_CHECKED,0);enableControls(false);selectPage(3,1);}
         dropdownTestId_=id;
@@ -181,6 +181,12 @@ void MainWindow::testControls() {
     check("sound defaults preserved",checked(KeepSoftLaugh)&&checked(KeepHeartbeat)&&checked(KeepTapping)&&!checked(KeepLoudLaugh)&&!checked(KeepVaping)&&!checked(KeepDrinking)&&!checked(KeepImpacts));
     check("airflow label no longer identifies a device",value(KeepVaping)==L"呼气/烟雾");
     check("pause and fade defaults preserved",value(Silence)==L"1.5"&&!checked(FadeEnabled)&&value(FadeSeconds)==L"0.3"&&!IsWindowEnabled(control(FadeSeconds)));
+    check("output edges default on at half a second",checked(EdgeFadeEnabled)&&value(EdgeFadeSeconds)==L"0.5"&&IsWindowEnabled(control(EdgeFadeSeconds)));
+    click(EdgeFadeEnabled);check("edge duration follows its switch",!IsWindowEnabled(control(EdgeFadeSeconds)));click(EdgeFadeEnabled);
+    text(EdgeFadeSeconds,L"0.8");click(Save);populateSettings(0);
+    check("edge duration saves and round trips independently of joins",cfg_["edge_fade_enabled"]==true&&cfg_["edge_fade_seconds"]==.8&&!cfg_["join_fade_enabled"].get<bool>()&&value(EdgeFadeSeconds)==L"0.8");
+    const auto beforeEdge=cfg_;text(EdgeFadeSeconds,L"4");click(Save);check("invalid edge duration cannot change configuration",cfg_==beforeEdge);
+    text(EdgeFadeSeconds,L"0.5");click(Save);
     SetWindowPos(window_,nullptr,0,0,d(1100),d(800),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
     screenshot(folder/L"preferences-editing.png");
     click(StrictDetails);
@@ -192,8 +198,12 @@ void MainWindow::testControls() {
         check(("input padding focuses without changing value "+std::to_string(id)).c_str(),GetFocus()==control(id)&&value(id)==before);
     }
     RECT action{},client{};GetWindowRect(control(Save),&action);MapWindowPoints(nullptr,window_,reinterpret_cast<POINT*>(&action),2);GetClientRect(window_,&client);
-    check("expanded strict fields fit above fixed actions and task footer",visible(Before)&&inputFrames_.at(Before).bottom+d(20)<=action.top&&action.bottom<client.bottom-d(80));
+    check("header actions and expanded strict fields fit minimum window",visible(Before)&&action.bottom<d(94)&&inputFrames_.at(Before).bottom+d(20)<client.bottom-d(80));
     screenshot(folder/L"preferences-editing-expanded.png");
+    SetWindowPos(window_,nullptr,0,0,d(1560),d(960),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
+    screenshot(folder/L"preferences-editing-wide.png");
+    check("wide window keeps bounded settings columns",inputFrames_.at(EdgeFadeSeconds).right<=d(224+1040-24));
+    SetWindowPos(window_,nullptr,0,0,d(1100),d(800),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
     text(Before,L"6.5");click(StrictDetails);click(SettingsRecognition);click(SettingsAudio);click(StrictDetails);
     check("folding and category changes keep strict drafts",visible(Before)&&value(Before)==L"6.5");
     text(Silence,L"1.2");click(FadeEnabled);text(FadeSeconds,L"0.45");
@@ -205,7 +215,7 @@ void MainWindow::testControls() {
     check("invalid fade rolls back all editing changes",cfg_==beforeInvalid);
     text(FadeSeconds,L"0.45");text(Silence,L"0.1");bool rejectedPause=false;try{readSettings();}catch(...){rejectedPause=true;}
     check("invalid maximum pause rejects task settings atomically",rejectedPause&&cfg_==beforeInvalid);
-    text(Silence,L"unfinished pause");text(FadeSeconds,L"0.6");
+    text(Silence,L"unfinished pause");text(FadeSeconds,L"0.6");text(EdgeFadeSeconds,L"0.9");
     click(SettingsRecognition);SendMessageW(control(SpeechChoice),CB_SETCURSEL,1,0);SendMessageW(control(ReviewChoice),CB_SETCURSEL,0,0);
     SendMessageW(control(Language),CB_SETCURSEL,2,0);SendMessageW(control(Device),CB_SETCURSEL,2,0);click(MenuEnabled);click(Audit);click(Save);
     check("recognition saves without parsing unfinished editing fields",cfg_["speech_model"]=="qwen3-asr"&&cfg_["review_model_id"]=="whisper-large-v3"&&cfg_["language"]=="ja"&&cfg_["device"]=="cpu"&&cfg_["generate_program_menu"]==false&&cfg_["review_enabled"]==false&&cfg_["max_pause_seconds"]==1.2);
@@ -213,11 +223,14 @@ void MainWindow::testControls() {
     check("enabling review restores model selection",IsWindowEnabled(control(ReviewChoice)));
     populateSettings(1);check("recognition selections round trip",value(Language)==L"日语"&&value(Device)==L"CPU"&&SendMessageW(control(SpeechChoice),CB_GETCURSEL,0,0)==1&&checked(Audit));
     SendMessageW(control(OutputKind),CB_SETCURSEL,2,0);click(Reset);
-    check("recognition reset preserves editing and output drafts",value(Silence)==L"unfinished pause"&&value(FadeSeconds)==L"0.6"&&checked(FadeEnabled)&&SendMessageW(control(OutputKind),CB_GETCURSEL,0,0)==2);
+    check("recognition reset preserves editing and output drafts",value(Silence)==L"unfinished pause"&&value(FadeSeconds)==L"0.6"&&value(EdgeFadeSeconds)==L"0.9"&&checked(FadeEnabled)&&SendMessageW(control(OutputKind),CB_GETCURSEL,0,0)==2);
+    SendMessageW(control(AudioEncoding),CB_SETCURSEL,1,0);click(Save);populateSettings(1);
+    check("output encoding is saved in recognition category",cfg_["audio_output_codec"]=="flac"&&SendMessageW(control(AudioEncoding),CB_GETCURSEL,0,0)==1);
     screenshot(folder/L"preferences-recognition.png");
+    SendMessageW(control(AudioEncoding),CB_SETCURSEL,2,0);
     SendMessageW(control(SpeechChoice),CB_SETCURSEL,1,0);SendMessageW(control(Language),CB_SETCURSEL,2,0);click(MenuEnabled);
     click(SettingsAudio);click(Reset);
-    check("editing reset preserves recognition drafts",SendMessageW(control(SpeechChoice),CB_GETCURSEL,0,0)==1&&value(Language)==L"日语"&&!checked(MenuEnabled)&&value(Silence)==L"1.5"&&!checked(FadeEnabled));
+    check("editing reset preserves recognition drafts",SendMessageW(control(AudioEncoding),CB_GETCURSEL,0,0)==2&&SendMessageW(control(SpeechChoice),CB_GETCURSEL,0,0)==1&&value(Language)==L"日语"&&!checked(MenuEnabled)&&value(Silence)==L"1.5"&&!checked(FadeEnabled)&&checked(EdgeFadeEnabled)&&value(EdgeFadeSeconds)==L"0.5");
     click(SettingsNetwork);text(ProxyUrl,L"http://127.0.0.1:10886");
     if(checked(ProxyEnabled))click(ProxyEnabled);
     click(Save);check("proxy off disables address",!IsWindowEnabled(control(ProxyUrl))&&cfg_["proxy_enabled"]==false);
@@ -226,10 +239,10 @@ void MainWindow::testControls() {
     screenshot(folder/L"preferences-network.png");
     click(Reset);check("network reset preserves other drafts",value(Language)==L"日语"&&!checked(MenuEnabled));
     enableControls(true);
-    check("busy state exposes cancel and locks all settings",visible(Progress)&&visible(Cancel)&&!IsWindowEnabled(control(OutputKind))&&!IsWindowEnabled(control(SpeechChoice))&&!IsWindowEnabled(control(ReviewChoice))&&!IsWindowEnabled(control(ProxyEnabled))&&!IsWindowEnabled(control(ProxyUrl))&&!IsWindowEnabled(control(Start))&&!IsWindowEnabled(control(KeepTapping))&&!IsWindowEnabled(control(FadeEnabled))&&!IsWindowEnabled(control(FadeSeconds))&&!IsWindowEnabled(control(MenuEnabled))&&!IsWindowEnabled(control(Save))&&!IsWindowEnabled(control(Reset)));
+    check("busy state exposes cancel and locks all settings",visible(Progress)&&visible(Cancel)&&!IsWindowEnabled(control(OutputKind))&&!IsWindowEnabled(control(AudioEncoding))&&!IsWindowEnabled(control(SpeechChoice))&&!IsWindowEnabled(control(ReviewChoice))&&!IsWindowEnabled(control(ProxyEnabled))&&!IsWindowEnabled(control(ProxyUrl))&&!IsWindowEnabled(control(Start))&&!IsWindowEnabled(control(KeepTapping))&&!IsWindowEnabled(control(FadeEnabled))&&!IsWindowEnabled(control(FadeSeconds))&&!IsWindowEnabled(control(EdgeFadeEnabled))&&!IsWindowEnabled(control(EdgeFadeSeconds))&&!IsWindowEnabled(control(MenuEnabled))&&!IsWindowEnabled(control(Save))&&!IsWindowEnabled(control(Reset)));
     click(SettingsRecognition);check("category navigation stays available while busy",settingsTab_==1&&visible(Audit)&&!IsWindowEnabled(control(Audit)));
     enableControls(false);check("idle state hides task progress",!visible(Progress)&&!visible(Cancel)&&IsWindowEnabled(control(Start)));
-    readSettings();check("starting task reads drafts from all categories",cfg_["speech_model"]=="qwen3-asr"&&cfg_["language"]=="ja"&&cfg_["generate_program_menu"]==false&&cfg_["output_kind"]=="video"&&cfg_["max_pause_seconds"]==1.5);
+    readSettings();check("starting task reads drafts from all categories",cfg_["audio_output_codec"]=="pcm"&&cfg_["speech_model"]=="qwen3-asr"&&cfg_["language"]=="ja"&&cfg_["generate_program_menu"]==false&&cfg_["output_kind"]=="video"&&cfg_["max_pause_seconds"]==1.5);
     selectPage(1);check("empty history only offers new task",visible(NewTask)&&!visible(History)&&!visible(Play)&&!visible(Mapping)&&!visible(OpenOutput));
     click(NewTask);check("new task opens editor",page_==0&&visible(Input));
     click(Extract);readSettings();check("V4 selection reaches task settings",cfg_["mode"]=="extract"&&visible(Extract));

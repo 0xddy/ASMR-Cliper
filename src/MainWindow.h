@@ -13,7 +13,7 @@ enum ControlId { Input=101, Output, BrowseInput, BrowseOutput, Strict, Relaxed, 
     SettingsSounds, KeepSoftLaugh, KeepLoudLaugh, KeepVaping, KeepDrinking, KeepImpacts, Extract, RepairReview, ReviewFindings,
     EnvironmentBase, EnvironmentModels, SpeechChoice, ReviewChoice, RepairQwen, RepairAligner, RepairClap, RepairNeural,
     KeepHeartbeat, KeepTapping, OutputKind, ProgramMenu, SettingsRecognition, MenuEnabled, MenuModels,
-    SettingsFade, FadeEnabled, FadeSeconds, StrictDetails, ModelSettings };
+    SettingsFade, FadeEnabled, FadeSeconds, StrictDetails, ModelSettings, EdgeFadeEnabled, EdgeFadeSeconds, AudioEncoding };
 
 inline constexpr std::pair<int,const char*> SoundOptions[] = {
     {KeepSoftLaugh,"keep_soft_laugh"},{KeepHeartbeat,"keep_heartbeat"},{KeepTapping,"keep_tapping"},
