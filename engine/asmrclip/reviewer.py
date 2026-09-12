@@ -9,6 +9,7 @@ import numpy as np
 
 from .common import event, merge, ROOT, read_json, save_json
 from .recognition import GENERIC, NONLEX
+from .progress import scope, advance, activity
 
 
 class SpeechRemaining(Exception):
@@ -136,9 +137,13 @@ class Reviewer:
             self.recognizer=Recognizer(self.cfg)
         audio=pcm.astype(np.float32)/32768
         findings=[]
-        for clips in groups:
+        checked=0
+        for index,clips in enumerate(groups):
             if not clips:continue
-            for s in self.recognizer.transcribe(audio,clips):
+            with scope(('全段检查 1/2','边界检查 2/2')[index],checked/windows_checked,(checked+len(clips))/windows_checked):
+                segments=self.recognizer.transcribe(audio,clips)
+            checked+=len(clips)
+            for s in segments:
                 if not review_speech(s):continue
                 findings.append({'start':s['start'],'end':s['end'],'text':s['text'],
                     'avg_logprob':s.get('avg_logprob'),'word_probability':sum(w.get('probability',0) for w in s['words'])/max(1,len(s['words'])) if s.get('backend')!='qwen3-asr' else None})
@@ -147,6 +152,7 @@ class Reviewer:
         return findings,windows_checked,False
 
     def inspect(self,path,export_report):
+        activity('解码候选音轨，准备本轮复核')
         pcm=decode_review_audio(path,export_report.get('timeline_review',False))
         duration=len(pcm)/16000
         if not len(pcm):raise RuntimeError('候选成片解码为空，不能标记复核通过。')
@@ -162,6 +168,7 @@ class Reviewer:
             if cached.get('cache_key')==key and isinstance(cached.get('review'),dict):
                 result=cached['review'];result['cache_reused']=True
                 event('log','复用同一音频帧内容与模型版本的完整成片复核。')
+                advance(1,1,'完整复核缓存')
                 return result
         findings=[];windows_checked=0;chunks_reused=0
         # Keep the existing model/rule signature and add the execution device.
@@ -169,9 +176,12 @@ class Reviewer:
         chunk_identity=review_cache_key(Path(self.path),self.language,'review-chunks-1',0,16000,1)+':'+self.cfg['device']
         # Full timeline coverage plus an extra pass at inference boundaries.
         # Adjacent 300-second batches overlap by two seconds as well.
-        for base in range(0,len(pcm),300*16000):
+        bases=range(0,len(pcm),300*16000)
+        for index,base in enumerate(bases):
             chunk=pcm[base:min(len(pcm),base+302*16000)]
-            rows,count,reused=self.inspect_chunk(chunk,chunk_identity)
+            with scope(f'音频块 {index+1}/{len(bases)}',index/len(bases),(index+1)/len(bases)):
+                rows,count,reused=self.inspect_chunk(chunk,chunk_identity)
+                if reused:activity('复用已完成的全段与边界检查')
             for s in rows:
                 a=max(0,s['start']+base/16000);b=min(duration,s['end']+base/16000)
                 if b>a:findings.append({**s,'start':a,'end':b})

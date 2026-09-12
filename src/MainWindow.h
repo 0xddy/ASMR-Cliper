@@ -55,13 +55,21 @@ private:
     void selectHistory();
     void testNavigationRendering();
     void testControls();
+    void testProgress();
     void testDropdowns();
     void testDropdownIdle(HWND popup);
     bool testing() const;
     void receive(const std::string&);
+    void beginTiming();
+    void stopTiming();
+    double elapsedSeconds() const;
+    void confirmLanguage(const nlohmann::json& data);
+    std::string chooseLanguage(const nlohmann::json& data);
     void appendLog(const std::wstring&);
     void chooseFile(bool folder);
     void prompt();
+    void showText(const std::wstring& title,const std::wstring& content);
+    std::wstring reviewFindingsText() const;
     void screenshot(const std::filesystem::path&, HWND popup = nullptr);
     void finishTest(DWORD code);
     int d(int value) const { return MulDiv(value, static_cast<int>(dpi_), 96); }
@@ -70,6 +78,7 @@ private:
     std::wstring value(int id) const;
     void text(int id, const std::wstring&);
     HWND window_ = nullptr;
+    HWND languageDialog_ = nullptr;
     HINSTANCE instance_ = nullptr;
     UINT dpi_ = 96;
     std::filesystem::path root_;
@@ -92,6 +101,9 @@ private:
     std::string activeAction_;
     std::wstring proxyStatus_;
     std::wstring downloadStatus_;
+    nlohmann::json taskProgress_ = nlohmann::json::object();
+    ULONGLONG taskStarted_ = 0, taskElapsed_ = 0;
+    bool timing_ = false, hasTiming_ = false;
     int dropdownTestId_ = 0;
     bool dropdownTestCancel_ = false, dropdownTestIdle_ = false;
     nlohmann::json dropdownChecks_ = nlohmann::json::array();

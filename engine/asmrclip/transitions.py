@@ -166,8 +166,9 @@ def review_transitions(cfg,pcm,cache,classifier,matcher,speech,music,exclusions,
             else:
                 pending_slices.append((r,len(pending),count));pending+=probes
         if pending:classifier.close()
+        from .progress import advance
         scored=matcher.score(pending,
-            lambda done,total:event('progress',f'音色过渡复核：{done} / {total} 个窗口',65.2+.6*done/total),required_keys=('background',))
+            lambda done,total:advance(done,total,'过渡窗口'),required_keys=('background',))
         report['semantic_candidates']=len(pending_slices)
         for r,index,count in pending_slices:
             probes=scored[index:index+count]

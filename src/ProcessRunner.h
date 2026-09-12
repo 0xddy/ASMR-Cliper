@@ -17,11 +17,13 @@ public:
                const std::vector<std::wstring>& arguments, const std::filesystem::path& cwd,
                const std::filesystem::path& log);
     void cancel();
+    void send(const std::string& line);
     void finish();
     bool running() const { return running_; }
 private:
     HANDLE process_ = nullptr;
     HANDLE job_ = nullptr;
+    HANDLE input_ = nullptr;
     std::thread reader_;
     std::atomic_bool running_ = false;
 };

@@ -2,6 +2,59 @@
 #include <commctrl.h>
 #include <algorithm>
 
+void MainWindow::testProgress() {
+    nlohmann::json checks=nlohmann::json::array();
+    auto check=[&](const char* name,bool passed){checks.push_back({{"name",name},{"passed",passed}});};
+    const auto folder=std::filesystem::path(Wide(options_["test-progress"])).parent_path();
+    SetWindowPos(window_,nullptr,0,0,d(1100),d(800),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
+    text(Input,L"D:\\ASMR\\示例录音.mp4");text(Output,L"D:\\ASMR\\剪辑结果");
+    activeAction_="run";completed_=false;notice_=true;enableControls(true);beginTiming();
+    taskStarted_-=18*60000+32000;
+    nlohmann::json progress={{"stage",5},{"stages",6},{"title","成片复核"},{"round",2},{"round_limit",3},
+        {"percent",46.2},{"detail","音频块 12/26 · 边界检查 2/2 · 窗口 5/11"}};
+    receive(nlohmann::json{{"type","task_progress"},{"task_progress",progress}}.dump());
+    const auto title=status_;
+    check("round and limit are visible",title.find(L"第 2 轮 / 最多 3 轮")!=std::wstring::npos);
+    receive(R"({"type":"log","message":"Qwen 语音定位：5 / 11 个窗口","progress":95})");
+    receive(R"({"type":"progress","message":"成片大模型复核","progress":98})");
+    check("legacy model logs cannot overwrite task progress",status_==title&&SendMessageW(control(Progress),PBM_GETPOS,0,0)==462);
+    const auto events=eventCount_;SendMessageW(window_,WM_TIMER,20,0);
+    check("clock timer never restarts environment inspection",activeAction_=="run"&&eventCount_==events);
+    check("elapsed clock runs without log events",elapsedSeconds()>=1112.);
+    for(int page:{0,3,4}) {selectPage(page);screenshot(folder/(L"progress-page-"+std::to_wstring(page)+L".png"));}
+    progress["round"]=3;progress["percent"]=0.;progress["detail"]="准备本轮候选音轨";
+    receive(nlohmann::json{{"type","task_progress"},{"task_progress",progress}}.dump());
+    check("next round resets only its own progress",status_.find(L"第 3 轮")!=std::wstring::npos&&SendMessageW(control(Progress),PBM_GETPOS,0,0)==0);
+    receive(R"({"type":"complete","message":"完成","output":"test.m4a","duration":4800,"segments":24,"speech_review":{"status":"passed"}})");
+    const auto elapsed=elapsedSeconds();taskStarted_-=5000;SendMessageW(window_,WM_TIMER,20,0);
+    check("completion freezes and persists elapsed independently of media duration",!timing_&&elapsedSeconds()==elapsed&&history_.front()["elapsed_seconds"]==elapsed&&history_.front()["duration"]==4800);
+    enableControls(false);selectPage(1);screenshot(folder/L"progress-complete.png");
+    completed_=false;beginTiming();taskStarted_-=65*60000+7000;
+    receive(R"({"type":"complete","output":"example_ASMR_v4.m4a","duration":7200,"segments":32,"speech_review":{"status":"needs_review","findings":[{"start":4980.12,"end":4982.36,"text":"这是一处疑似话语"}]}})");
+    enableControls(false);selectPage(1);
+    check("uncertain speech completes and remains in history",completed_&&history_.front()["speech_review"]["status"]=="needs_review"&&status_.find(L"失败")==std::wstring::npos);
+    const auto findings=reviewFindingsText();
+    check("history exposes exact output positions and transcripts",findings.find(L"01:23:00.120")!=std::wstring::npos&&findings.find(L"这是一处疑似话语")!=std::wstring::npos&&(GetWindowLongPtrW(control(ReviewFindings),GWL_STYLE)&WS_VISIBLE));
+    screenshot(folder/L"progress-flagged.png");
+    beginTiming();check("new task resets elapsed and stage",elapsedSeconds()<1.&&taskProgress_.empty());
+    receive(R"({"type":"error","message":"test error"})");check("errors stop elapsed clock",!timing_);
+    beginTiming();cancelled_=true;stopTiming();const auto cancelledElapsed=elapsedSeconds();taskStarted_-=5000;
+    check("cancelled task elapsed stays fixed",elapsedSeconds()==cancelledElapsed);cancelled_=false;
+    const nlohmann::json language={{"detected","ko"},{"choices",{"ko","ja","zh","en"}}};
+    options_["test-language-choice"]="ja";
+    check("language dialog accepts a corrected language",chooseLanguage(language)=="ja");
+    options_["test-language-choice"]="ko";
+    check("language dialog accepts detected language",chooseLanguage(language)=="ko");
+    options_["test-language-choice"]="cancel";
+    check("language dialog cancellation does not choose a language",chooseLanguage(language).empty());
+    auto unknown=language;unknown["detected"]="auto";options_["test-language-choice"]="zh";
+    check("unknown language can be explicitly selected",chooseLanguage(unknown)=="zh");
+    options_.erase("test-language-choice");
+    bool passed=std::all_of(checks.begin(),checks.end(),[](const auto& row){return row.at("passed").template get<bool>();});
+    WriteJson(std::filesystem::path(Wide(options_["test-progress"])),{{"passed",passed},{"checks",checks}});
+    completed_=passed;finishTest(passed?0:1);
+}
+
 void MainWindow::testDropdownIdle(HWND popup) {
     if(dropdownTestIdle_)return;
     dropdownTestIdle_=true;

@@ -30,8 +30,17 @@ void ProcessRunner::cancel() {
     if (job_) TerminateJobObject(job_, ERROR_CANCELLED);
 }
 
+void ProcessRunner::send(const std::string& line) {
+    // Only short, newline-delimited control messages are sent from the UI thread.
+    if(!running_||!input_||line.size()>4096)throw std::runtime_error("任务已结束，无法提交语言选择。");
+    const auto data=line+"\n";DWORD written=0;
+    if(!WriteFile(input_,data.data(),static_cast<DWORD>(data.size()),&written,nullptr)||written!=data.size())
+        throw std::runtime_error("无法提交语言选择，请查看任务日志。");
+}
+
 void ProcessRunner::finish() {
     if (reader_.joinable()) reader_.join();
+    if (input_) { CloseHandle(input_); input_ = nullptr; }
     if (process_) { CloseHandle(process_); process_ = nullptr; }
     if (job_) { CloseHandle(job_); job_ = nullptr; }
     running_ = false;
@@ -45,16 +54,19 @@ void ProcessRunner::start(HWND window, const std::filesystem::path& executable,
     std::wstring command = QuoteWindowsArgument(executable.wstring());
     for (const auto& arg : arguments) command += L" " + QuoteWindowsArgument(arg);
     SECURITY_ATTRIBUTES sa{ sizeof(sa), nullptr, TRUE };
-    HANDLE readPipe = nullptr, writePipe = nullptr, nullInput = INVALID_HANDLE_VALUE;
+    HANDLE readPipe = nullptr, writePipe = nullptr, readInput = nullptr;
     PROCESS_INFORMATION pi{};
     auto cleanup = [&] {
         if (readPipe) CloseHandle(readPipe);
         if (writePipe) CloseHandle(writePipe);
-        if (nullInput != INVALID_HANDLE_VALUE) CloseHandle(nullInput);
+        if (readInput) CloseHandle(readInput);
+        if (input_) {CloseHandle(input_);input_=nullptr;}
     };
     if (!CreatePipe(&readPipe, &writePipe, &sa, 0)) throw std::runtime_error("Cannot create output pipe.");
     if (!SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0)) { cleanup(); throw std::runtime_error("Cannot protect pipe handle."); }
-    nullInput = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, nullptr);
+    if(!CreatePipe(&readInput,&input_,&sa,0)||!SetHandleInformation(input_,HANDLE_FLAG_INHERIT,0)) {
+        cleanup();throw std::runtime_error("Cannot create task input pipe.");
+    }
     job_ = CreateJobObjectW(nullptr, nullptr);
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -67,7 +79,7 @@ void ProcessRunner::start(HWND window, const std::filesystem::path& executable,
     si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
     si.wShowWindow = SW_HIDE;
     si.hStdOutput = si.hStdError = writePipe;
-    si.hStdInput = nullInput;
+    si.hStdInput = readInput;
     if (!CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, TRUE,
                         CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, cwd.c_str(), &si, &pi)) {
         const auto error = GetLastError();
@@ -83,7 +95,7 @@ void ProcessRunner::start(HWND window, const std::filesystem::path& executable,
     process_ = pi.hProcess;
     running_ = true;
     CloseHandle(writePipe); writePipe = nullptr;
-    CloseHandle(nullInput); nullInput = INVALID_HANDLE_VALUE;
+    CloseHandle(readInput); readInput = nullptr;
     ResumeThread(pi.hThread);
     CloseHandle(pi.hThread);
     const HANDLE process = process_;

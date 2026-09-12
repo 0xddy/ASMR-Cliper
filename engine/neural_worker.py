@@ -34,12 +34,14 @@ def transcribe(model,req):
     audio=np.load(req['audio']);rows=[]
     for i,clip in enumerate(req['clips']):
         a,b=clip['start'],clip['end'];part=audio[max(0,round(a*16000)):round(b*16000)]
-        if len(part)<1600:continue
+        if len(part)<1600:
+            emit('work_progress',done=i+1,total=len(req['clips']))
+            continue
         result=model.transcribe(audio=(part,16000),language=req.get('language'),return_time_stamps=True)[0]
         words=[{'start':float(w.start_time)+a,'end':float(w.end_time)+a,'word':w.text} for w in result.time_stamps or [] if w.end_time>w.start_time]
         rows.append({'text':result.text,'language':result.language,'words':words,'backend':'qwen3-asr',
             'start':min((w['start'] for w in words),default=a),'end':max((w['end'] for w in words),default=b)})
-        if (i+1)%5==0 or i+1==len(req['clips']):emit('log',message=f'Qwen 语音定位：{i+1} / {len(req["clips"])} 个窗口')
+        emit('work_progress',done=i+1,total=len(req['clips']))
     return rows
 
 

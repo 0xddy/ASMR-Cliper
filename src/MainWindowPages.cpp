@@ -17,7 +17,7 @@ void Rounded(HDC dc,RECT r,COLORREF fill,COLORREF border,int radius=14) {
 }
 std::wstring Number(double v) {std::wostringstream out;out<<v;return out.str();}
 std::wstring ClockTime(double seconds) {
-    int n=static_cast<int>(seconds+.5);wchar_t text[32]{};swprintf_s(text,L"%02d:%02d:%02d",n/3600,(n/60)%60,n%60);return text;
+    int n=static_cast<int>(seconds);wchar_t text[32]{};swprintf_s(text,L"%02d:%02d:%02d",n/3600,(n/60)%60,n%60);return text;
 }
 struct EnvironmentRow {const char* key;const wchar_t* name;int repair;int tab;};
 const EnvironmentRow EnvironmentRows[]={
@@ -40,7 +40,7 @@ const EnvironmentRow* EnvironmentRepair(int id) {for(const auto& row:Environment
 }
 
 bool MainWindow::testing() const {
-    return options_.contains("snapshot")||options_.contains("self-test")||options_.contains("test-job")||options_.contains("test-action")||options_.contains("test-navigation")||options_.contains("test-controls")||options_.contains("test-dropdowns");
+    return options_.contains("snapshot")||options_.contains("self-test")||options_.contains("test-job")||options_.contains("test-action")||options_.contains("test-navigation")||options_.contains("test-controls")||options_.contains("test-dropdowns")||options_.contains("test-progress");
 }
 
 void MainWindow::createControls() {
@@ -88,7 +88,7 @@ void MainWindow::createControls() {
     add(Progress,-1,PROGRESS_CLASSW,L"",PBS_SMOOTH);SendMessageW(control(Progress),PBM_SETRANGE32,0,1000);SetWindowTheme(control(Progress),L"",L"");SendMessageW(control(Progress),PBM_SETBARCOLOR,0,Accent);SendMessageW(control(Progress),PBM_SETBKCOLOR,0,White);
     setFonts();populateSettings();updateHistory();enableControls(false);
     SendMessageW(window_,WM_CHANGEUISTATE,MAKEWPARAM(UIS_SET,UISF_HIDEFOCUS),0);
-    appendLog(L"ASMR-Cliper 0.6.3");
+    appendLog(L"ASMR-Cliper 0.6.4");
     selectPage(page_);
 }
 
@@ -225,7 +225,7 @@ void MainWindow::paint(HDC dc) {
     auto line=[&](int a,int y,int right) {auto pen=CreatePen(PS_SOLID,1,Line);auto old=SelectObject(dc,pen);MoveToEx(dc,d(a),d(y),nullptr);LineTo(dc,d(right),d(y));SelectObject(dc,old);DeleteObject(pen);};
     RECT side{0,0,d(200),b.bottom};FillRect(dc,&side,white_);
     auto icon=LoadIconW(instance_,MAKEINTRESOURCEW(101));if(icon)DrawIconEx(dc,d(22),d(32),icon,d(24),d(24),0,nullptr,DI_NORMAL);
-    label(L"ASMR-Cliper",54,28,142,32,brandFont_);label(L"v0.6.3",24,h-43,140,20,smallFont_,Muted);
+    label(L"ASMR-Cliper",54,28,142,32,brandFont_);label(L"v0.6.4",24,h-43,140,20,smallFont_,Muted);
     const wchar_t* titles[]={L"剪辑任务",L"处理记录",L"运行环境",L"偏好设置",L"运行日志"};label(titles[page_],x,24,cw-260,42,titleFont_);
     if(page_==0) {
         card(96,374);label(L"音频 / 视频文件",x+24,110,cw-48,24,font_);label(L"输出目录",x+24,194,cw-48,24,font_);
@@ -291,8 +291,20 @@ void MainWindow::paint(HDC dc) {
     for(const auto& [id,frame]:inputFrames_) if(GetWindowLongPtrW(control(id),GWL_STYLE)&WS_VISIBLE)Rounded(dc,frame,IsWindowEnabled(control(id))?White:Bg,Line,d(12));
     if(busy_) {
         RECT footer{d(200),d(h-80),b.right,b.bottom};FillRect(dc,&footer,white_);line(200,h-80,w);
-        label(status_,x,h-66,cw-124,28,font_);if(!downloadStatus_.empty())label(downloadStatus_,x,h-35,cw-124,20,smallFont_,Muted);
-    } else if(notice_&&!status_.empty())label(status_,x,h-56,cw,32,font_,Muted);
+        label(status_,x,h-70,cw-124,28,font_);
+        std::wstring detail=downloadStatus_;
+        if(activeAction_=="run"&&!taskProgress_.empty()) {
+            detail=Wide(taskProgress_.value("detail",""));
+            if(taskProgress_.value("percent",nlohmann::json()).is_number()) {
+                detail+=L"   ·   "+std::wstring(taskProgress_.value("round",0)>0?L"本轮 ":L"本阶段 ")+std::to_wstring(static_cast<int>(taskProgress_["percent"].get<double>()))+L"%";
+            }
+        }
+        label(detail,x,h-38,cw-294,22,smallFont_,Muted);
+        if(hasTiming_)label(L"已用时 "+ClockTime(elapsedSeconds()),r-282,h-38,166,22,smallFont_,Muted);
+    } else if(notice_&&!status_.empty()) {
+        label(status_,x,h-56,cw-(hasTiming_?180:0),32,font_,Muted);
+        if(hasTiming_)label(L"耗时 "+ClockTime(elapsedSeconds()),r-170,h-56,170,32,smallFont_,Muted);
+    }
 }
 
 void MainWindow::drawButton(const DRAWITEMSTRUCT* item) {
@@ -304,7 +316,8 @@ void MainWindow::drawButton(const DRAWITEMSTRUCT* item) {
         if(index>=0&&static_cast<size_t>(index)<history_.size()) {
             const auto& row=history_[index];r.left+=d(16);r.right-=d(16);RECT title=r;title.top+=d(8);title.bottom=title.top+d(28);
             auto name=fs::path(Wide(row.value("output",""))).filename().wstring();SelectObject(item->hDC,font_);SetTextColor(item->hDC,Ink);DrawTextW(item->hDC,name.c_str(),-1,&title,DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);
-            std::wstring sub=Wide(row.value("finished_at",""))+L"   ·   "+ClockTime(row.value("duration",0.))+L"   ·   "+std::to_wstring(row.value("segments",0))+L" 段";
+            std::wstring sub=Wide(row.value("finished_at",""))+L"   ·   时长 "+ClockTime(row.value("duration",0.))+L"   ·   "+std::to_wstring(row.value("segments",0))+L" 段";
+            if(row.contains("elapsed_seconds"))sub+=L"   ·   耗时 "+ClockTime(row.value("elapsed_seconds",0.));
             auto review=row.value("speech_review",nlohmann::json::object());auto reviewStatus=review.value("status","");
             sub+=reviewStatus=="passed"?L"   ·   模型复核通过":reviewStatus=="needs_review"?L"   ·   "+std::to_wstring(review.value("findings",nlohmann::json::array()).size())+L" 处待复听":L"   ·   未做成片复核";
             r.top+=d(41);SelectObject(item->hDC,smallFont_);SetTextColor(item->hDC,Muted);DrawTextW(item->hDC,sub.c_str(),-1,&r,DT_LEFT|DT_SINGLELINE|DT_END_ELLIPSIS);

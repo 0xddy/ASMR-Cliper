@@ -128,7 +128,9 @@ def analyze_decoded(source,cache,meta):
                     block.sample_rate=meta['sample_rate']
                     for output in mono.resample(block):wav.writeframesraw(output.to_ndarray().tobytes())
             if len(levels) and len(levels)%8192==0:
-                event('progress',f'已分析 {len(levels)*1024/meta["sample_rate"]/60:.0f} 分钟音轨',18)
+                seconds=len(levels)*1024/meta['sample_rate']
+                expected=meta.get('duration',0)
+                event('progress',f'已分析 {seconds/60:.0f} 分钟音轨',min(18,2+16*seconds/expected) if expected else None)
         for output in mono.resample(None):wav.writeframesraw(output.to_ndarray().tobytes())
     if not levels:raise ValueError('没有足够的可解码音频。')
     meta.update(frames=len(levels),analysis_duration=len(levels)*1024/meta['sample_rate'],

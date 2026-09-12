@@ -22,6 +22,21 @@ int wmain(int argc,wchar_t** argv) {
         HWND window=CreateWindowW(wc.lpszClassName,L"",0,0,0,0,0,HWND_MESSAGE,nullptr,wc.hInstance,nullptr);
         ProcessRunner runner;
         auto log=std::filesystem::temp_directory_path()/(L"asmrclip-process-test-"+std::to_wstring(GetCurrentProcessId())+L".log");
+        runner.start(window,argv[1],{L"-u",L"-c",L"import json,sys; reply=json.loads(sys.stdin.readline()); print(reply['language'],flush=True)"},std::filesystem::current_path(),log);
+        runner.send("{\"type\":\"language_confirmed\",\"language\":\"ja\"}");
+        bool received=false;auto inputBegin=GetTickCount64();
+        while(!received&&GetTickCount64()-inputBegin<10000) {
+            MSG msg{};
+            while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)) {
+                if(msg.message==WM_ENGINE_LINE) {
+                    auto line=reinterpret_cast<std::string*>(msg.lParam);received=*line=="ja"||*line=="ja\r";delete line;
+                } else DispatchMessageW(&msg);
+            }
+            Sleep(10);
+        }
+        if(!received)runner.cancel();runner.finish();
+        if(!received){DestroyWindow(window);std::filesystem::remove(log);std::cerr<<"Language reply did not reach the waiting process.\n";return 1;}
+        std::cout<<"Language confirmation resumed the waiting process.\n";
         runner.start(window,argv[1],{L"-u",L"-c",L"import subprocess,sys,time; p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']); print(p.pid,flush=True); time.sleep(60)"},std::filesystem::current_path(),log);
         DWORD childId=0;
         const auto begin=GetTickCount64();

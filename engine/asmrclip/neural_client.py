@@ -30,7 +30,10 @@ class NeuralClient:
             if response.get('type')=='response':
                 if not response.get('ok'):raise RuntimeError(response.get('error','音频模型推理失败'))
                 return response.get('result')
-            if response.get('type')=='progress':event('progress',response.get('message',''),response.get('progress',50))
+            if response.get('type')=='work_progress':
+                from .progress import advance
+                advance(response['done'],response['total'])
+            elif response.get('type')=='progress':event('progress',response.get('message',''),response.get('progress'))
             elif response.get('message'):event('log',response['message'])
         raise RuntimeError('音频模型进程提前结束，请查看运行日志。')
 

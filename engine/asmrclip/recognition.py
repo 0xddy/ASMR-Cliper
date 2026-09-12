@@ -2,12 +2,14 @@ import dataclasses
 import hashlib
 import json
 import re
+from bisect import bisect_right
 from pathlib import Path
 
 import numpy as np
 from scipy.io import wavfile
 
 from .common import event, merge, save_json, read_json
+from .progress import scope, advance, activity
 
 GENERIC = re.compile(r'다음\s*영상|시청.*감사|영상.{0,25}감사|봐주.{0,15}감사|구독|자막|영상.*만나요|thanks?\s+for\s+watching|subscribe|ご視聴|字幕|感谢观看|謝謝觀看', re.I)
 NONLEX = re.compile(r'^[으음어아오우흐흠하헤히헉휴후응웅잉에엥크킁흫와예악윽앗헐야ㅎㅋ]+$|^(?:[aumoh]+|ah|uh|hmm|ha)+$|^(?:he|hi|ho){2,}$|^[啊嗯哦呃唔哈呵嘻嘿はあうんえお]+$', re.I)
@@ -108,12 +110,20 @@ class WhisperRecognizer:
     def transcribe(self, audio, clips, offset=0):
         if not clips:
             return []
+        advance(0,len(clips))
         self.load()
         segs, info = self.pipe.transcribe(audio, language=self.language, beam_size=5, batch_size=self.batch_size,
             word_timestamps=True, clip_timestamps=clips, condition_on_previous_text=False,
             temperature=0, max_new_tokens=160, no_repeat_ngram_size=3)
         result = []
+        ends=sorted(c['end'] for c in clips)
+        completed=0
         for s in segs:
+            # A transcript can have many segments per window, or none at all.
+            # Only report windows already passed on the original timeline.
+            past=bisect_right(ends,s.start)
+            if past>completed:
+                completed=past;advance(completed,len(clips))
             d = dataclasses.asdict(s)
             d['start'] += offset
             d['end'] += offset
@@ -121,7 +131,12 @@ class WhisperRecognizer:
                 w['start'] += offset
                 w['end'] += offset
             result.append(d)
+        advance(len(clips),len(clips))
         return result
+
+    def transcribe_pass(self, audio, clips, offset, label, start, end):
+        with scope(label,start,end):
+            return self.transcribe(audio,clips,offset)
 
     def close(self):
         self.pipe=None;self.model=None
@@ -144,26 +159,45 @@ class WhisperRecognizer:
         done = {r['offset'] for r in rows}
         if rows:
             event('log', f'复用 {len(done)} 段已完成的语音定位缓存。')
-        if self.language is None:
+        automatic=self.language is None
+        detail='来自已完成的语言识别缓存'
+        if automatic:
             if rows:
                 self.language = rows[0]['language']
             else:
                 audio = pcm[:min(len(pcm), sr*180)].astype(np.float32)/32768
-                self.language, detail = self.detect_language(audio)
+                with scope('语言检测',0,0):
+                    self.language, detail = self.detect_language(audio)
                 event('log', f'自动识别语言：{self.language}{detail}；可在界面手动指定语言')
+        if automatic and cfg.get('confirm_detected_language',False):
+            from .interaction import confirm_language
+            self.language=confirm_language(self.language,detail)
+            # A changed language must never reuse transcripts from the old one.
+            # Use the same identity as a manually selected-language task.
+            identity=self.cache_identity({**cfg,'language':self.language})
+            token=hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:12]
+            path=cache/f'speech-{token}.jsonl'
+            rows=recover_jsonl(path)
+            done={r['offset'] for r in rows}
+        activity('语言已确定，准备全段语音检查')
         with path.open('a', encoding='utf-8') as f:
-            for offset in range(0, len(pcm), 600*sr):
+            offsets=range(0, len(pcm), 600*sr)
+            for index,offset in enumerate(offsets):
                 sec = offset/sr
                 if sec in done:
+                    with scope(f'音频块 {index+1}/{len(offsets)} · 复用缓存',index/len(offsets),(index+1)/len(offsets)):
+                        pass
                     continue
                 audio = pcm[offset:offset+600*sr].astype(np.float32)/32768
                 vad = get_speech_timestamps(audio, vad_options=VadOptions(threshold=.35, min_speech_duration_ms=180,
                     min_silence_duration_ms=350, speech_pad_ms=350, max_speech_duration_s=28))
                 clips = [{'start':v['start']/sr, 'end':v['end']/sr} for v in vad]
                 continuous = [{'start':x, 'end':min(x+28, len(audio)/sr)} for x in range(0, int(np.ceil(len(audio)/sr)), 28)]
-                row = {'offset':sec, 'language':self.language, 'vad':[[v['start']/sr+sec, v['end']/sr+sec] for v in vad],
-                       'vad_segments':self.transcribe(audio, clips, sec),
-                       'continuous_segments':self.transcribe(audio, continuous, sec)}
+                with scope(f'音频块 {index+1}/{len(offsets)}',index/len(offsets),(index+1)/len(offsets)):
+                    split=len(clips)/max(1,len(clips)+len(continuous))
+                    row = {'offset':sec, 'language':self.language, 'vad':[[v['start']/sr+sec, v['end']/sr+sec] for v in vad],
+                           'vad_segments':self.transcribe_pass(audio,clips,sec,'人声检查 1/2',0,split),
+                           'continuous_segments':self.transcribe_pass(audio,continuous,sec,'全段检查 2/2',split,1)}
                 rows.append(row)
                 f.write(json.dumps(row, ensure_ascii=False)+'\n')
                 f.flush()
@@ -192,13 +226,15 @@ class WhisperRecognizer:
             return []
         edited = np.concatenate(parts)
         found = []
-        for offset in range(0, len(edited), 600*16000):
+        offsets=range(0,len(edited),600*16000)
+        for index,offset in enumerate(offsets):
             audio = edited[offset:offset+600*16000].astype(np.float32)/32768
             vad = get_speech_timestamps(audio, vad_options=VadOptions(threshold=.15, min_speech_duration_ms=140,
                 min_silence_duration_ms=250, speech_pad_ms=300, max_speech_duration_s=28))
             clips = [{'start':v['start']/16000,'end':v['end']/16000} for v in vad]
             absolute = [[v['start']/16000+offset/16000,v['end']/16000+offset/16000] for v in vad]
-            for s in self.transcribe(audio, clips, offset/16000):
+            segments=self.transcribe_pass(audio,clips,offset/16000,f'计划预检 · 音频块 {index+1}/{len(offsets)}',index/len(offsets),(index+1)/len(offsets))
+            for s in segments:
                 if not plausible(s, absolute, continuous=True):
                     continue
                 for lo, hi, source in mapping:
@@ -223,10 +259,12 @@ class QwenRecognizer(WhisperRecognizer):
 
     def transcribe(self,audio,clips,offset=0):
         if not clips:return []
+        advance(0,len(clips))
         if self.client is None:
             from .neural_client import NeuralClient
             self.client=NeuralClient('qwen',self.cfg)
         result=self.client.request({'op':'transcribe','clips':clips,'language':self.LANGUAGES.get(self.language)},audio)
+        advance(len(clips),len(clips))
         for s in result:
             s['start']+=offset;s['end']+=offset
             for w in s['words']:w['start']+=offset;w['end']+=offset

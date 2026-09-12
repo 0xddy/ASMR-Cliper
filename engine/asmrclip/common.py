@@ -9,6 +9,11 @@ DLL_HANDLES = []
 
 def event(kind, message='', progress=None, **values):
     record = {'type': kind, 'message': message, **values}
+    if kind == 'progress':
+        from .progress import legacy_update
+        structured = legacy_update(message, progress)
+        if structured is not None:
+            record['task_progress'] = structured
     if progress is not None:
         record['progress'] = round(progress, 2)
     print(json.dumps(record, ensure_ascii=False), flush=True)

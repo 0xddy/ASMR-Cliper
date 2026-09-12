@@ -125,8 +125,18 @@ class ReviewExtractionTests(unittest.TestCase):
                     return {'status':'speech_found','findings':[{'start':1,'end':2,'text':'hello'}]}
             with self.assertRaises(SpeechRemaining):export(source,out,meta,frames,plan,cfg,fingerprint(source),Reject())
             self.assertEqual(list(out.iterdir()),[])
-            with self.assertRaises(SpeechRemaining):export(source,out,meta,frames,plan,cfg,fingerprint(source),Reject(),allow_review_findings=True)
-            self.assertEqual(list(out.iterdir()),[])
+            flagged=export(source,out,meta,frames,plan,cfg,fingerprint(source),Reject(),allow_review_findings=True)
+            self.assertEqual(flagged['speech_review']['status'],'needs_review')
+            self.assertTrue(Path(flagged['output']).is_file())
+            self.assertTrue(flagged['payload_unchanged'])
+            self.assertTrue(flagged['decode_verified'])
+            self.assertIn('hello',(Path(flagged['output']).parent/'人声复核.csv').read_text(encoding='utf-8-sig'))
+            class Broken:
+                def inspect(self,path,report):raise RuntimeError('model inference failed')
+            before=set(out.iterdir())
+            with self.assertRaisesRegex(RuntimeError,'model inference failed'):
+                export(source,out,meta,frames,plan,cfg,fingerprint(source),Broken(),allow_review_findings=True)
+            self.assertEqual(set(out.iterdir()),before)
             class Approve:
                 def inspect(self,path,report):
                     assert len(decode_review_audio(path))>1000
@@ -139,6 +149,52 @@ class ReviewExtractionTests(unittest.TestCase):
             flagged=export(source,out,meta,frames,plan,cfg,fingerprint(source),Reject(),allow_review_findings=True)
             self.assertEqual(flagged['speech_review']['status'],'needs_review')
             self.assertTrue((Path(flagged['output']).parent/'人声复核.csv').exists())
+
+
+    def test_pipeline_publishes_remaining_speech_in_every_mode_and_keeps_last_valid_candidate(self):
+        import contextlib,io
+        from unittest.mock import MagicMock,patch
+        from asmrclip.pipeline import run
+        ffmpeg=ROOT/'runtime/tools/ffmpeg.exe'
+        if not ffmpeg.exists():self.skipTest('FFmpeg is not installed')
+        with tempfile.TemporaryDirectory(prefix='ASMR flagged ') as folder:
+            folder=Path(folder);source=folder/'source.m4a'
+            subprocess.run([str(ffmpeg),'-v','error','-f','lavfi','-i','sine=frequency=337:sample_rate=44100:duration=5','-c:a','aac',str(source)],check=True)
+            with contextlib.redirect_stdout(io.StringIO()):meta,frames=analyze(source,folder/'prepared')
+            dt=1024/meta['sample_rate'];base={'keep_frames':[[5,meta['frames']-5]],'frame_seconds':dt,'duration':(meta['frames']-10)*dt}
+            for mode,empty in [('strict',False),('relaxed',False),('extract',False),('extract',True)]:
+                with self.subTest(mode=mode,replan_empty=empty):
+                    cfg=settings({'input':str(source),'output_dir':str(folder/'out'),'cache_dir':str(folder/'cache'),
+                                  'mode':mode,'review_max_passes':2,'audit':False})
+                    recognizer=MagicMock();recognizer.scan.return_value={'spoken':[],'language':'en'}
+                    classifier=MagicMock();classifier.music_intervals.return_value=[]
+                    classifier.exclusions.return_value={key:[] for key in ('voice','soft_laugh','heartbeat','tapping','loud_laugh','airflow','drinking','impacts')}
+                    reviewer=MagicMock()
+                    reviewer.inspect.side_effect=lambda path,report:{'status':'speech_found',
+                        'findings':[{'start':.2,'end':.4,'text':'possible speech'}],
+                        'candidate_payload_sha256':report['payload_sha256']}
+                    plans=[dict(base),{**base,'keep_frames':[]} if empty else dict(base)]
+                    with patch('asmrclip.model_catalog.validate_models'),patch('asmrclip.reviewer.validate_review_model'), \
+                         patch('asmrclip.recognition.Recognizer',return_value=recognizer),patch('asmrclip.classifier.Classifier',return_value=classifier), \
+                         patch('asmrclip.semantic.confirm',return_value={}),patch('asmrclip.reviewer.Reviewer',return_value=reviewer), \
+                         patch('asmrclip.transitions.review_transitions',return_value=([],{'candidates':[]})), \
+                         patch('asmrclip.planner.make_plan',side_effect=plans),contextlib.redirect_stdout(io.StringIO()) as output:
+                        report=run(cfg)
+                    self.assertTrue(Path(report['output']).is_file())
+                    self.assertTrue(report['payload_unchanged']);self.assertTrue(report['decode_verified'])
+                    self.assertEqual(report['speech_review']['status'],'needs_review')
+                    self.assertEqual(report['speech_review']['candidate_payload_sha256'],report['payload_sha256'])
+                    import json
+                    events=[json.loads(line) for line in output.getvalue().splitlines()]
+                    self.assertEqual(events[-1]['type'],'complete')
+                    self.assertFalse(any(e['type']=='error' for e in events))
+                    rounds=[e['task_progress']['round'] for e in events if e.get('task_progress',{}).get('stage')==5]
+                    self.assertEqual(max(rounds),1 if empty else 2)
+                    self.assertEqual(reviewer.inspect.call_count,2)
+            # Constructor mocks retain mmap arguments in cyclic call records.
+            # Release those before Windows removes the temporary cache files.
+            import gc
+            gc.collect()
 
 
 if __name__=='__main__':unittest.main()

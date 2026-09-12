@@ -136,6 +136,18 @@ std::wstring MainWindow::value(int id) const {
 }
 void MainWindow::text(int id,const std::wstring& content) { SetWindowTextW(control(id),content.c_str()); }
 
+void MainWindow::beginTiming() {
+    taskStarted_=GetTickCount64();taskElapsed_=0;timing_=true;hasTiming_=true;
+    taskProgress_=json::object();SetTimer(window_,20,1000,nullptr);
+}
+void MainWindow::stopTiming() {
+    if(timing_)taskElapsed_=GetTickCount64()-taskStarted_;
+    timing_=false;KillTimer(window_,20);
+}
+double MainWindow::elapsedSeconds() const {
+    return static_cast<double>(timing_?GetTickCount64()-taskStarted_:taskElapsed_)/1000.;
+}
+
 int MainWindow::run(HINSTANCE instance,int show) {
     instance_=instance;
     INITCOMMONCONTROLSEX cc{sizeof(cc),ICC_PROGRESS_CLASS|ICC_STANDARD_CLASSES}; InitCommonControlsEx(&cc);
@@ -260,14 +272,15 @@ void MainWindow::start(bool doctor) {
         saveSettings();
         fs::create_directories(root_/L"runtime/jobs");fs::create_directories(root_/L"runtime/logs");
         std::wstring token=std::to_wstring(GetCurrentProcessId())+L"_"+std::to_wstring(GetTickCount64());
-        auto job=root_/L"runtime/jobs"/(token+L".json");WriteJson(job,cfg_);
+        auto job=root_/L"runtime/jobs"/(token+L".json");
+        auto jobSettings=cfg_;jobSettings["confirm_detected_language"]=!testing();WriteJson(job,jobSettings);
         cancelled_=false;completed_=false;checking_=false;eventCount_=0;activeAction_="run";downloadStatus_.clear();notice_=true;
         status_=L"正在准备本地音频分析…";SendMessageW(control(Progress),PBM_SETPOS,0,0);
         appendLog(L"开始剪辑 · "+Wide(cfg_.value("mode","relaxed")=="strict"?"严格模式 V2":cfg_.value("mode","")=="extract"?"提取模式 V4":"宽松模式 V3"));
-        enableControls(true);
+        enableControls(true);beginTiming();
         runner_.start(window_,python,{L"-X",L"utf8",L"-u",(root_/L"engine/main.py").wstring(),L"run",L"--config",job.wstring()},root_,root_/L"runtime/logs"/(token+L".log"));
     } catch(const std::exception& e) {
-        enableControls(false);notice_=true;status_=Wide(e.what());appendLog(L"无法开始："+status_);InvalidateRect(window_,nullptr,FALSE);
+        stopTiming();enableControls(false);notice_=true;status_=Wide(e.what());appendLog(L"无法开始："+status_);InvalidateRect(window_,nullptr,FALSE);
         if(testing()) finishTest(1);
     }
 }
@@ -286,19 +299,94 @@ void MainWindow::environmentTask(const std::string& action,const std::string& co
         activeAction_=action;cancelled_=false;completed_=false;checking_=true;eventCount_=0;downloadStatus_.clear();notice_=true;
         status_=action=="inspect"?L"正在检测运行环境…":action=="install"?L"正在补齐运行环境…":L"正在测试下载连接…";
         if(action=="testproxy"){proxyTested_=true;proxyResults_=json::array();proxyStatus_=L"正在测试连接…";}
-        SendMessageW(control(Progress),PBM_SETPOS,0,0);appendLog(status_);enableControls(true);
+        SendMessageW(control(Progress),PBM_SETPOS,0,0);appendLog(status_);enableControls(true);beginTiming();
         runner_.start(window_,powershell,{L"-NoProfile",L"-NonInteractive",L"-ExecutionPolicy",L"Bypass",L"-File",(root_/L"scripts/environment.ps1").wstring(),L"-Action",Wide(action),L"-Config",job.wstring(),L"-Component",Wide(component)},root_,root_/L"runtime/logs"/(token+L".log"));
     } catch(const std::exception& e) {
-        enableControls(false);notice_=true;status_=Wide(e.what());appendLog(status_);InvalidateRect(window_,nullptr,FALSE);if(testing())finishTest(1);
+        stopTiming();enableControls(false);notice_=true;status_=Wide(e.what());appendLog(status_);InvalidateRect(window_,nullptr,FALSE);if(testing())finishTest(1);
     }
+}
+
+std::string MainWindow::chooseLanguage(const json& data) {
+    const auto choices=data.value("choices",std::vector<std::string>{"ko","ja","zh","en"});
+    const std::map<std::string,std::wstring> names{{"ko",L"韩语"},{"ja",L"日语"},{"zh",L"中文"},{"en",L"英语"}};
+    const auto detected=data.value("detected","");
+    auto name=[&](const std::string& code){auto found=names.find(code);return found!=names.end()?found->second:Wide(code);};
+    std::vector<std::wstring> labels;std::vector<TASKDIALOG_BUTTON> radios;
+    for(const auto& code:choices)labels.push_back(name(code)+(code==detected?L"（识别结果）":L""));
+    int selected=0;
+    for(size_t i=0;i<labels.size();++i) {
+        radios.push_back({100+static_cast<int>(i),labels[i].c_str()});
+        if(choices[i]==detected)selected=radios.back().nButtonID;
+    }
+    std::wstring content=selected?L"识别为 "+name(detected)+L"。确认或修改后继续当前任务。":L"未能确定语言，请选择后继续当前任务。";
+    TASKDIALOG_BUTTON buttons[]={{IDOK,L"确认并继续"},{IDCANCEL,L"取消任务"}};
+    struct State {MainWindow* app;int selected;const std::vector<std::string>* choices;} state{this,selected,&choices};
+    TASKDIALOGCONFIG dialog{sizeof(dialog)};dialog.hwndParent=window_;dialog.hInstance=instance_;
+    dialog.dwFlags=TDF_ALLOW_DIALOG_CANCELLATION|TDF_POSITION_RELATIVE_TO_WINDOW|TDF_SIZE_TO_CONTENT;
+    dialog.pszWindowTitle=L"确认录音语言";dialog.pszMainInstruction=L"录音中的说话声是什么语言？";
+    dialog.pszContent=content.c_str();dialog.pszFooter=L"任务已暂停，确认后从当前步骤继续。";
+    dialog.cButtons=2;dialog.pButtons=buttons;dialog.nDefaultButton=IDOK;
+    dialog.cRadioButtons=static_cast<UINT>(radios.size());dialog.pRadioButtons=radios.data();dialog.nDefaultRadioButton=selected;
+    if(!selected)dialog.dwFlags|=TDF_NO_DEFAULT_RADIO_BUTTON;
+    dialog.lpCallbackData=reinterpret_cast<LONG_PTR>(&state);
+    dialog.pfCallback=[](HWND hwnd,UINT notification,WPARAM,LPARAM,LONG_PTR value)->HRESULT {
+        auto& s=*reinterpret_cast<State*>(value);
+        if(notification==TDN_CREATED) {
+            s.app->languageDialog_=hwnd;
+            SendMessageW(hwnd,TDM_ENABLE_BUTTON,IDOK,s.selected!=0);
+            if(s.app->testing()&&s.app->options_.contains("test-language-choice")) {
+                const auto choice=s.app->options_["test-language-choice"].get<std::string>();
+                auto it=std::find(s.choices->begin(),s.choices->end(),choice);
+                if(it!=s.choices->end())PostMessageW(hwnd,TDM_CLICK_RADIO_BUTTON,100+std::distance(s.choices->begin(),it),0);
+                PostMessageW(hwnd,TDM_CLICK_BUTTON,it!=s.choices->end()?IDOK:IDCANCEL,0);
+            }
+        } else if(notification==TDN_RADIO_BUTTON_CLICKED)SendMessageW(hwnd,TDM_ENABLE_BUTTON,IDOK,TRUE);
+        else if(notification==TDN_DESTROYED)s.app->languageDialog_=nullptr;
+        return S_OK;
+    };
+    int button=IDCANCEL,radio=0;
+    if(FAILED(TaskDialogIndirect(&dialog,&button,&radio,nullptr)))throw std::runtime_error("无法显示语言确认窗口。");
+    return button==IDOK&&radio>=100&&radio<100+static_cast<int>(choices.size())?choices[radio-100]:"";
+}
+
+void MainWindow::confirmLanguage(const json& data) {
+    if(cancelled_||completed_||!runner_.running())return;
+    if(!taskProgress_.empty())taskProgress_["detail"]="等待确认语言，可在弹窗中修改后继续";
+    InvalidateRect(window_,nullptr,FALSE);
+    try {
+        const auto chosen=chooseLanguage(data);
+        if(!runner_.running())return;
+        if(chosen.empty()) {
+            cancelled_=true;status_=L"正在取消任务…";EnableWindow(control(Cancel),FALSE);runner_.cancel();
+        } else {
+            runner_.send(json{{"type","language_confirmed"},{"language",chosen}}.dump());
+            appendLog(L"已确认本次任务语言："+Wide(chosen));
+        }
+    } catch(const std::exception& e) {
+        status_=L"处理失败："+Wide(e.what());notice_=true;stopTiming();appendLog(status_);runner_.cancel();
+    }
+    InvalidateRect(window_,nullptr,FALSE);
 }
 
 void MainWindow::receive(const std::string& line) {
     auto data=json::parse(line,nullptr,false);
     if(data.is_discarded()||!data.is_object()) {if(!line.empty())appendLog(Wide(line));return;}
     ++eventCount_;auto type=data.value("type","");std::wstring msg=Wide(data.value("message",""));
-    if(data.contains("progress")) SendMessageW(control(Progress),PBM_SETPOS,static_cast<WPARAM>(std::clamp(data["progress"].get<double>(),0.,100.)*10),0);
-    if(!msg.empty()) {appendLog(msg);status_=msg;}
+    if(!msg.empty())appendLog(msg);
+    if(activeAction_=="run"&&data.contains("task_progress")&&timing_&&!completed_&&!cancelled_) {
+        const auto previous=taskProgress_;
+        taskProgress_=data["task_progress"];
+        status_=L"阶段 "+std::to_wstring(taskProgress_.value("stage",1))+L"/"+std::to_wstring(taskProgress_.value("stages",6))+L" · "+Wide(taskProgress_.value("title","处理中"));
+        const int round=taskProgress_.value("round",0);
+        if(round>0)status_+=L" · 第 "+std::to_wstring(round)+L" 轮 / 最多 "+std::to_wstring(taskProgress_.value("round_limit",round))+L" 轮 · 通过即结束";
+        if(previous.value("stage",0)!=taskProgress_.value("stage",0)||previous.value("round",0)!=round)appendLog(status_);
+        double percent=taskProgress_.value("percent",json()).is_number()?taskProgress_["percent"].get<double>():0.;
+        SendMessageW(control(Progress),PBM_SETPOS,static_cast<WPARAM>(std::clamp(percent,0.,100.)*10),0);
+    } else if(activeAction_!="run"||taskProgress_.empty()) {
+        if(data.contains("progress")&&data["progress"].is_number())SendMessageW(control(Progress),PBM_SETPOS,static_cast<WPARAM>(std::clamp(data["progress"].get<double>(),0.,100.)*10),0);
+        if(!msg.empty()&&type!="log")status_=msg;
+    }
+    if(type=="language_confirmation") {confirmLanguage(data);return;}
     if(type=="component") {
         components_[data.value("id","")]=data;
     } else if(type=="environment") {
@@ -317,7 +405,9 @@ void MainWindow::receive(const std::string& line) {
             if(!row.value("ok",false)) appendLog(Wide(row.value("detail",row.value("error",""))));
         }
     } else if(type=="complete") {
+        stopTiming();
         lastResult_=data;completed_=true;EnableWindow(control(Cancel),FALSE);
+        lastResult_["elapsed_seconds"]=elapsedSeconds();
         status_=L"完成 · "+Duration(data.value("duration",0.))+L" · "+std::to_wstring(data.value("segments",0))+L" 段";
         auto review=data.value("speech_review",json::object());
         if(review.value("status","")=="needs_review")status_+=L" · "+std::to_wstring(review.value("findings",json::array()).size())+L" 处待复听";
@@ -329,7 +419,7 @@ void MainWindow::receive(const std::string& line) {
         if(!testing()) {try {WriteJson(root_/L"config/history.json",history_);}catch(const std::exception& e){appendLog(L"记录保存失败："+Wide(e.what()));}}
         updateHistory();if(!testing())selectPage(1);
     }
-    if(type=="error"){notice_=true;status_=L"处理失败："+msg;if(activeAction_=="testproxy")proxyStatus_=msg;}
+    if(type=="error"){stopTiming();notice_=true;status_=L"处理失败："+msg;if(activeAction_=="testproxy")proxyStatus_=msg;}
     if(type=="component"||type=="environment"||type=="proxy_result"){updateVisibility();layout();}
     InvalidateRect(window_,nullptr,FALSE);
 }
@@ -349,11 +439,30 @@ void MainWindow::prompt() {
     if(!any)content+=L"无";
     content+=L"。当前选择优先于默认设置；与说话重叠或无法自然衔接的片段仍可能被一起剪掉。";
     content+=L"\n成片大模型复核："+std::wstring(extract||SendMessageW(control(Audit),BM_GETCHECK,0,0)==BST_CHECKED?L"开启":L"关闭")+L"。";
+    showText(strict?L"严格模式（V2）提示词":extract?L"提取模式（V4）提示词":L"宽松模式（V3）提示词",content);
+}
+
+std::wstring MainWindow::reviewFindingsText() const {
+    auto findings=lastResult_.value("speech_review",json::object()).value("findings",json::array());
+    std::wstring content=L"已完成 · "+std::to_wstring(findings.size())+L" 处待复听\n时间对应剪辑后的成片。\n\n";
+    auto stamp=[](double seconds) {
+        auto ms=static_cast<ULONGLONG>(std::max(0.,seconds)*1000+.5);wchar_t text[48]{};
+        swprintf_s(text,L"%02llu:%02llu:%02llu.%03llu",ms/3600000,(ms/60000)%60,(ms/1000)%60,ms%1000);return std::wstring(text);
+    };
+    for(const auto& row:findings) {
+        content+=stamp(row.value("start",0.))+L" — "+stamp(row.value("end",0.))+L"\n"+Wide(row.value("text",""))+L"\n\n";
+    }
+    return content;
+}
+
+void MainWindow::showText(const std::wstring& title,const std::wstring& content) {
     std::wstring crlf;
     for(auto c:content) { if(c==L'\n') crlf.push_back(L'\r');crlf.push_back(c); }
     PromptState state{crlf,font_};
     WNDCLASSW wc{};wc.lpfnWndProc=PromptProc;wc.hInstance=instance_;wc.lpszClassName=L"ASMRCLIP.Prompt";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);RegisterClassW(&wc);
-    auto popup=CreateWindowExW(WS_EX_DLGMODALFRAME,wc.lpszClassName,strict?L"严格模式（V2）提示词":extract?L"提取模式（V4）提示词":L"宽松模式（V3）提示词",WS_OVERLAPPEDWINDOW|WS_VISIBLE,CW_USEDEFAULT,CW_USEDEFAULT,d(790),d(710),window_,nullptr,instance_,&state);
+    auto popup=CreateWindowExW(WS_EX_DLGMODALFRAME,wc.lpszClassName,title.c_str(),WS_OVERLAPPEDWINDOW|WS_VISIBLE,CW_USEDEFAULT,CW_USEDEFAULT,d(790),d(710),window_,nullptr,instance_,&state);
+    if(!popup){appendLog(L"无法打开详情窗口。");return;}
+    SetWindowTextW(GetDlgItem(popup,2),L"复制内容");
     EnableWindow(window_,FALSE);
     MSG message{};
     while(IsWindow(popup)&&GetMessageW(&message,nullptr,0,0)>0) {
@@ -501,9 +610,10 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
             fs::path dir=lastResult_.contains("output")?fs::path(Wide(lastResult_["output"])).parent_path():fs::path(value(Output));
             if(fs::is_directory(dir)) ShellExecuteW(window_,L"open",dir.c_str(),nullptr,nullptr,SW_SHOWNORMAL);
             else appendLog(L"输出目录尚未创建，完成首次剪辑后即可打开。");
-        } else if((id==Play||id==Mapping||id==ReviewFindings)&&lastResult_.contains("output")) {
+        } else if(id==ReviewFindings&&lastResult_.contains("output")) {
+            showText(L"待复听位置 · "+fs::path(Wide(lastResult_["output"])).filename().wstring(),reviewFindingsText());
+        } else if((id==Play||id==Mapping)&&lastResult_.contains("output")) {
             fs::path target=Wide(lastResult_["output"]);if(id==Mapping) target=target.parent_path()/L"剪辑时间对照.csv";
-            if(id==ReviewFindings)target=target.parent_path()/L"人声复核.csv";
             if(fs::exists(target)) ShellExecuteW(window_,L"open",target.c_str(),nullptr,nullptr,SW_SHOWNORMAL);
         }
         return 0;
@@ -511,6 +621,8 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
     case WM_ENGINE_LINE: { std::unique_ptr<std::string> line(reinterpret_cast<std::string*>(lp));receive(*line);return 0; }
     case WM_ENGINE_DONE: {
         runner_.finish();
+        if(languageDialog_)SendMessageW(languageDialog_,TDM_CLICK_BUTTON,IDCANCEL,0);
+        stopTiming();
         if(activeAction_=="inspect"&&wp==0&&completed_&&!cancelled_)notice_=false;
         if(activeAction_=="testproxy"&&completed_&&!cancelled_)notice_=false;
         if(cancelled_||wp!=0) {
@@ -528,8 +640,14 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
         return 0;
     }
     case WM_TIMER:
+        if(wp==20) {
+            RECT footer{};GetClientRect(window_,&footer);footer.top=std::max(0L,footer.bottom-d(80));
+            InvalidateRect(window_,&footer,FALSE);return 0;
+        }
+        if(wp!=1)return 0;
         KillTimer(window_,1);
-        if(options_.contains("test-dropdowns")) testDropdowns();
+        if(options_.contains("test-progress")) testProgress();
+        else if(options_.contains("test-dropdowns")) testDropdowns();
         else if(options_.contains("test-controls")) testControls();
         else if(options_.contains("test-navigation")) testNavigationRendering();
         else if(options_.contains("test-job")) start(false);

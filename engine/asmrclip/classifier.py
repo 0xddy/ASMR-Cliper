@@ -8,6 +8,7 @@ from .common import event, read_json, save_json, merge, complement
 from .exclusions import summarize, strong_voice, airflow_events, supported_utterance, drinking_events, extend_breaks, laugh_kind, impact_events, rhythmic_events, KEEP_DEFAULTS
 from .extraction import extraction_regions
 from .acoustic_features import ast_features
+from .progress import activity
 
 
 class Classifier:
@@ -42,6 +43,7 @@ class Classifier:
         keys = [f'{a:.5f}:{b:.5f}' for a,b in wanted]
         pending = dict((key, pair) for key,pair in zip(keys, wanted) if key not in self.cached)
         jobs = list(pending.items())
+        if jobs:activity(f'声学窗口 0/{len(jobs)}')
         # Boundary planning and retries often ask only for cached windows.
         # Do not rewrite a multi-megabyte cache when nothing changed.
         if not jobs:
@@ -67,6 +69,7 @@ class Classifier:
                     scores = {self.labels[str(i)]:float(x) for i,x in enumerate(p)}
                     self.cached[key] = {'start':a,'end':b,'quiet':False,**summarize(scores)}
             completed = min(offset+8, len(jobs))
+            activity(f'声学窗口 {completed}/{len(jobs)}')
             if completed % 160 == 0 or completed == len(jobs):
                 # Atomic checkpoints survive cancellation during long scans.
                 save_json(self.path, {'model':self.identity,'windows':self.cached})

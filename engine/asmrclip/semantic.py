@@ -143,8 +143,9 @@ def confirm(cfg,pcm,cache,classifier,speech,music,exclusions,duration,matcher=No
     owned=matcher is None
     matcher=matcher or SoundMatcher(cfg,pcm,cache)
     try:
+        from .progress import advance
         scored=matcher.score([r for r in records if not r.get('quiet')],
-            lambda done,total:event('progress',f'确认 ASMR 声音：{done} / {total} 个窗口',66+3*done/total))
+            lambda done,total:advance(done,total,'ASMR 窗口'))
     finally:
         if owned:matcher.close()
     by_span={(r['start'],r['end']):r for r in scored}

@@ -185,17 +185,23 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
             report['media_kind']='audio'
         else:report=copy_media_packets(source,staging/filename,meta,frames,plan,media)
         if reviewer is not None:
-            from .reviewer import SpeechRemaining
+            from .reviewer import SpeechRemaining, mapped_output_to_source
             review=reviewer.inspect(candidate or staging/filename,report)
             review['export_mapping']=report['mapping']
             if review['status']!='passed':
-                if allow_review_findings and cfg['mode']!='extract' and review['status']=='speech_found':
+                if review['status']!='speech_found':
+                    raise RuntimeError('成片复核未正常完成，请查看模型运行日志。')
+                mapped=mapped_output_to_source(review['findings'],report['mapping'])
+                if allow_review_findings or not mapped:
                     review['status']='needs_review'
-                    review['note']='已达到设定复核轮数，仍有模型疑似话语；成片已保存，请按人声复核.csv 的位置复听。'
+                    review['note']='仍有模型疑似话语，成片已保存；请在处理记录中查看待复听位置。'
+                    if not mapped:review['note']+=' 疑似位置无法映射为可调整的源片段，保留当前候选。'
                 else:raise SpeechRemaining(review)
         elif cfg.get('review_enabled',False) or cfg['mode']=='extract':
             raise RuntimeError('请求了成片复核，但复核模型未运行，不能发布结果。')
         else:review={'status':'disabled'}
+        from .progress import phase
+        phase(6, '复核通过，准备导出' if review['status']=='passed' else '准备最终导出与校验', legacy=(98,100))
         if media['kind']=='video':
             event('progress','按已确认时间轴复制视频与音轨，合并封装',98)
             final=copy_media_packets(source,staging/filename,meta,frames,plan,media,intervals)
