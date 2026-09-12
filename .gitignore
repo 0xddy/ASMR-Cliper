@@ -1,0 +1,23 @@
+/build/
+/bin/
+/runtime/
+/models/
+/output/
+/dist/
+/config/user.json
+/config/history.json
+__pycache__/
+*.pyc
+/.vs/
+
+# Machine-specific shortcuts and local review artifacts
+*.lnk
+*.pyo
+/docs/*.png
+/docs/验证结果*.json
+/docs/导航重绘验证.json
+/docs/本版验证*.md
+/docs/WIN64_NV_VALIDATION.md
+.env
+.env.*
+!.env.example

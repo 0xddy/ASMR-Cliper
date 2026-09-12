@@ -1,0 +1,201 @@
+name: Build win64-nv (full portable package)
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Windows x64 runner label (VS 2022, at least 50 GiB free)'
+        type: string
+        default: windows-2022
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: win64-nv-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: pwsh
+
+env:
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+  PIP_NO_CACHE_DIR: '1'
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
+
+jobs:
+  download:
+    name: Download all environments and models
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 300
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      logs_id: ${{ steps.logs.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Select work volume
+        id: disk
+        run: ./scripts/ci-workspace.ps1 -MinimumFreeGiB 50
+      - name: Download and validate dependencies
+        env:
+          BUILD_WORK: ${{ steps.disk.outputs.work }}
+        run: ./scripts/download-win64-nv.ps1 -WorkDirectory $env:BUILD_WORK
+      - name: Save reusable download snapshot
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: win64-nv-environment-${{ github.run_id }}
+          path: ${{ steps.disk.outputs.work }}/dependencies/**
+          include-hidden-files: true
+          compression-level: 0
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+      - name: Preserve download logs
+        id: logs
+        if: ${{ !cancelled() && steps.disk.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: win64-nv-download-logs-${{ github.run_id }}
+          path: ${{ steps.disk.outputs.work }}/reports/**
+          if-no-files-found: warn
+          overwrite: true
+          retention-days: 7
+      - name: Clean this runner work directory
+        if: ${{ always() && steps.disk.outcome == 'success' }}
+        env:
+          BUILD_WORK: ${{ steps.disk.outputs.work }}
+        run: ./scripts/ci-clean-work.ps1 -WorkDirectory $env:BUILD_WORK
+
+  build:
+    name: Compile and test Win64 GUI
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 30
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      logs_id: ${{ steps.logs.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Select work volume
+        id: disk
+        run: ./scripts/ci-workspace.ps1 -MinimumFreeGiB 2
+      - name: Build Release and run native tests
+        env:
+          BUILD_WORK: ${{ steps.disk.outputs.work }}
+        run: ./scripts/build-win64-nv.ps1 -WorkDirectory $env:BUILD_WORK
+      - name: Save compiled executables
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: win64-nv-native-${{ github.run_id }}
+          path: ${{ steps.disk.outputs.work }}/native/**
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+      - name: Preserve compiler and native test logs
+        id: logs
+        if: ${{ !cancelled() && steps.disk.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: win64-nv-build-logs-${{ github.run_id }}
+          path: ${{ steps.disk.outputs.work }}/reports/**
+          if-no-files-found: warn
+          overwrite: true
+          retention-days: 7
+      - name: Clean this runner work directory
+        if: ${{ always() && steps.disk.outcome == 'success' }}
+        env:
+          BUILD_WORK: ${{ steps.disk.outputs.work }}
+        run: ./scripts/ci-clean-work.ps1 -WorkDirectory $env:BUILD_WORK
+
+  package:
+    name: Assemble and validate portable package
+    needs: [download, build]
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Select work volume
+        id: disk
+        run: ./scripts/ci-workspace.ps1 -MinimumFreeGiB 50
+      - name: Restore completed downloads
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: win64-nv-environment-${{ github.run_id }}
+          path: ${{ steps.disk.outputs.work }}/payload/ASMR Cliper 构建
+      - name: Restore compiled executables
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: win64-nv-native-${{ github.run_id }}
+          path: ${{ steps.disk.outputs.work }}/native
+      - name: Test assembled package and create ZIP64
+        id: package
+        env:
+          BUILD_WORK: ${{ steps.disk.outputs.work }}
+        run: ./scripts/package-win64-nv.ps1 -WorkDirectory $env:BUILD_WORK
+      - name: Upload final ZIP64
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: ${{ steps.package.outputs.archive }}
+          archive: false
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+      - name: Preserve final checksums and test reports
+        if: ${{ !cancelled() && steps.disk.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: win64-nv-final-reports-${{ github.run_id }}
+          path: |
+            ${{ steps.disk.outputs.work }}/reports/**
+            ${{ steps.disk.outputs.work }}/artifacts/*.sha256
+          if-no-files-found: warn
+          overwrite: true
+          retention-days: 7
+      - name: Clean this runner work directory
+        if: ${{ always() && steps.disk.outcome == 'success' }}
+        env:
+          BUILD_WORK: ${{ steps.disk.outputs.work }}
+        run: ./scripts/ci-clean-work.ps1 -WorkDirectory $env:BUILD_WORK
+
+  cleanup:
+    name: Delete intermediate artifacts after success
+    needs: [download, build, package]
+    if: ${{ !cancelled() && needs.package.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Release intermediate artifact storage
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ARTIFACT_IDS: ${{ needs.download.outputs.artifact_id }} ${{ needs.download.outputs.logs_id }} ${{ needs.build.outputs.artifact_id }} ${{ needs.build.outputs.logs_id }}
+        run: |
+          set -euo pipefail
+          for artifact in $ARTIFACT_IDS; do
+            [[ "$artifact" =~ ^[0-9]+$ ]] || exit 1
+            if ! result=$(gh api --method DELETE "repos/$GH_REPO/actions/artifacts/$artifact" 2>&1); then
+              # Retrying cleanup can encounter artifacts already deleted by its first attempt.
+              if [[ "$result" != *"(HTTP 404)"* ]]; then
+                printf '%s\n' "$result" >&2
+                exit 1
+              fi
+            fi
+          done
+          cat >> "$GITHUB_STEP_SUMMARY" <<'NOTE'
+          Intermediate environments, binaries and their logs were deleted after successful final upload.
+          Final ZIP64 and validation reports remain downloadable for 7 days.
+          No Actions cache is created. Consumed runner minutes cannot be reclaimed.
+          NOTE

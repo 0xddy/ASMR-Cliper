@@ -1,0 +1,551 @@
+#include "MainWindow.h"
+#include "UiControls.h"
+#include "UiTheme.h"
+#include <commctrl.h>
+#include <shobjidl.h>
+#include <shellapi.h>
+#include <uxtheme.h>
+#include <wrl/client.h>
+#include <gdiplus.h>
+#include <algorithm>
+#include <cmath>
+#include <fstream>
+#include <iomanip>
+#include <memory>
+#include <sstream>
+
+using json = nlohmann::json;
+namespace fs = std::filesystem;
+using Microsoft::WRL::ComPtr;
+namespace {
+using namespace UiTheme;
+std::wstring Duration(double sec) {
+    auto s=static_cast<int>(std::round(sec));
+    std::wostringstream out;
+    out<<s/3600<<L" 小时 "<<(s%3600)/60<<L" 分 "<<s%60<<L" 秒";
+    return out.str();
+}
+std::wstring Number(double v) {
+    std::wostringstream out; out<<v; return out.str();
+}
+void Rounded(HDC dc, RECT r, COLORREF fill, COLORREF border, int radius=16) {
+    auto brush=CreateSolidBrush(fill); auto pen=CreatePen(PS_SOLID,1,border);
+    auto oldB=SelectObject(dc,brush); auto oldP=SelectObject(dc,pen);
+    RoundRect(dc,r.left,r.top,r.right,r.bottom,radius,radius);
+    SelectObject(dc,oldB); SelectObject(dc,oldP); DeleteObject(brush); DeleteObject(pen);
+}
+void Clipboard(HWND owner, const std::wstring& content) {
+    if (!OpenClipboard(owner)) return;
+    auto memory=GlobalAlloc(GMEM_MOVEABLE,(content.size()+1)*sizeof(wchar_t));
+    if (memory) {
+        void* ptr=GlobalLock(memory);
+        if (ptr) {
+            memcpy(ptr,content.c_str(),(content.size()+1)*sizeof(wchar_t)); GlobalUnlock(memory);
+            EmptyClipboard(); if (!SetClipboardData(CF_UNICODETEXT,memory)) GlobalFree(memory);
+        } else GlobalFree(memory);
+    }
+    CloseClipboard();
+}
+struct PromptState { std::wstring content; HFONT font; HWND edit=nullptr; };
+LRESULT CALLBACK PromptProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
+    auto state=reinterpret_cast<PromptState*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
+    if (msg==WM_NCCREATE) {
+        state=static_cast<PromptState*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
+        SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(state));
+    }
+    if (!state) return DefWindowProcW(hwnd,msg,wp,lp);
+    switch(msg) {
+    case WM_CREATE: {
+        state->edit=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",state->content.c_str(),WS_CHILD|WS_VISIBLE|WS_VSCROLL|ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL,0,0,0,0,hwnd,reinterpret_cast<HMENU>(1),nullptr,nullptr);
+        SendMessageW(state->edit,WM_SETFONT,reinterpret_cast<WPARAM>(state->font),TRUE);
+        auto copy=CreateWindowW(L"BUTTON",L"复制提示词",WS_CHILD|WS_VISIBLE|WS_TABSTOP,0,0,0,0,hwnd,reinterpret_cast<HMENU>(2),nullptr,nullptr);
+        auto close=CreateWindowW(L"BUTTON",L"关闭",WS_CHILD|WS_VISIBLE|WS_TABSTOP,0,0,0,0,hwnd,reinterpret_cast<HMENU>(3),nullptr,nullptr);
+        SendMessageW(copy,WM_SETFONT,reinterpret_cast<WPARAM>(state->font),TRUE);
+        SendMessageW(close,WM_SETFONT,reinterpret_cast<WPARAM>(state->font),TRUE);
+        return 0;
+    }
+    case WM_SIZE: {
+        int w=LOWORD(lp),h=HIWORD(lp),pad=MulDiv(16,GetDpiForWindow(hwnd),96),height=MulDiv(38,GetDpiForWindow(hwnd),96);
+        MoveWindow(state->edit,pad,pad,w-2*pad,h-height-3*pad,TRUE);
+        MoveWindow(GetDlgItem(hwnd,2),pad,h-height-pad,8*pad,height,TRUE);
+        MoveWindow(GetDlgItem(hwnd,3),w-6*pad,h-height-pad,5*pad,height,TRUE);
+        return 0;
+    }
+    case WM_COMMAND:
+        if (LOWORD(wp)==2) Clipboard(hwnd,state->content);
+        if (LOWORD(wp)==3) DestroyWindow(hwnd);
+        return 0;
+    case WM_CLOSE: DestroyWindow(hwnd); return 0;
+    }
+    return DefWindowProcW(hwnd,msg,wp,lp);
+}
+}
+
+std::string Utf8(const std::wstring& value) {
+    if (value.empty()) return {};
+    int size=WideCharToMultiByte(CP_UTF8,0,value.data(),static_cast<int>(value.size()),nullptr,0,nullptr,nullptr);
+    std::string result(size,0);
+    WideCharToMultiByte(CP_UTF8,0,value.data(),static_cast<int>(value.size()),result.data(),size,nullptr,nullptr);
+    return result;
+}
+std::wstring Wide(const std::string& value) {
+    if (value.empty()) return {};
+    int size=MultiByteToWideChar(CP_UTF8,0,value.data(),static_cast<int>(value.size()),nullptr,0);
+    std::wstring result(size,0);
+    MultiByteToWideChar(CP_UTF8,0,value.data(),static_cast<int>(value.size()),result.data(),size);
+    return result;
+}
+json ReadJson(const fs::path& path) {
+    std::ifstream stream(path,std::ios::binary);
+    if (!stream) throw std::runtime_error("Cannot read configuration file.");
+    return json::parse(stream);
+}
+void WriteJson(const fs::path& path,const json& value) {
+    fs::create_directories(path.parent_path());
+    auto temp=path; temp+=L".tmp";
+    { std::ofstream file(temp,std::ios::binary); file<<value.dump(2); if (!file) throw std::runtime_error("Cannot save configuration."); }
+    if (!MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)) throw std::runtime_error("Cannot commit configuration file.");
+}
+
+MainWindow::MainWindow(fs::path root,json options):root_(std::move(root)),options_(std::move(options)) {
+    cfg_=ReadJson(root_/L"config/defaults.json");
+    if (fs::exists(root_/L"config/user.json")) {
+        try { cfg_.update(ReadJson(root_/L"config/user.json")); } catch (...) { notice_=true;status_=L"上次设置无法读取，已恢复默认设置。"; }
+    }
+    if (options_.contains("test-job")) cfg_.update(ReadJson(fs::path(Wide(options_["test-job"]))));
+    if (options_.contains("test-config")) cfg_.update(ReadJson(fs::path(Wide(options_["test-config"]))));
+    cfg_["input"]=cfg_.value("input","");
+    cfg_["output_dir"]=cfg_.value("output_dir",Utf8((root_/L"output").wstring()));
+    white_=CreateSolidBrush(White); background_=CreateSolidBrush(Bg);
+    try { environment_=ReadJson(root_/L"runtime/environment-status.json");for(auto& c:environment_["components"]) components_[c["id"]]=c; } catch(...) {}
+    try { if(!testing()) {history_=ReadJson(root_/L"config/history.json");if(!history_.is_array())history_=json::array();} } catch(...) {}
+    const std::vector<std::string> pages{"task","history","environment","settings","logs"};
+    auto page=std::find(pages.begin(),pages.end(),options_.value("page","task"));page_=page==pages.end()?0:static_cast<int>(page-pages.begin());
+    settingsTab_=options_.value("settings-tab","")=="network"?1:options_.value("settings-tab","")=="sounds"?2:0;
+    environmentTab_=options_.value("environment-tab","")=="base"?0:1;
+}
+MainWindow::~MainWindow() {
+    runner_.cancel(); runner_.finish();
+    for (auto font:{font_,titleFont_,boldFont_,smallFont_,brandFont_}) if(font) DeleteObject(font);
+    DeleteObject(white_); DeleteObject(background_);
+}
+HWND MainWindow::control(int id) const { auto it=controls_.find(id); return it==controls_.end()?nullptr:it->second; }
+std::wstring MainWindow::value(int id) const {
+    int length=GetWindowTextLengthW(control(id)); std::wstring result(static_cast<size_t>(length)+1,0);
+    GetWindowTextW(control(id),result.data(),length+1); result.resize(length); return result;
+}
+void MainWindow::text(int id,const std::wstring& content) { SetWindowTextW(control(id),content.c_str()); }
+
+int MainWindow::run(HINSTANCE instance,int show) {
+    instance_=instance;
+    INITCOMMONCONTROLSEX cc{sizeof(cc),ICC_PROGRESS_CLASS|ICC_STANDARD_CLASSES}; InitCommonControlsEx(&cc);
+    WNDCLASSEXW wc{sizeof(wc)};
+    wc.lpfnWndProc=WindowProc; wc.hInstance=instance; wc.lpszClassName=L"ASMRCLIP.MainWindow";
+    wc.hCursor=LoadCursorW(nullptr,IDC_ARROW); wc.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(101));wc.hIconSm=static_cast<HICON>(LoadImageW(instance,MAKEINTRESOURCEW(101),IMAGE_ICON,GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON),LR_DEFAULTCOLOR));
+    RegisterClassExW(&wc);
+    dpi_=GetDpiForSystem();
+    window_=CreateWindowExW(WS_EX_ACCEPTFILES,wc.lpszClassName,L"ASMR-Cliper",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,
+        CW_USEDEFAULT,CW_USEDEFAULT,d(1140),d(820),nullptr,nullptr,instance,this);
+    if(!window_) throw std::runtime_error("Cannot create application window.");
+    bool test=testing();
+    ShowWindow(window_,test?SW_HIDE:show); UpdateWindow(window_);
+    SetTimer(window_,1,test?500:900,nullptr);
+    MSG msg{};
+    while(GetMessageW(&msg,nullptr,0,0)>0) {
+        if(!IsDialogMessageW(window_,&msg)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
+    }
+    return static_cast<int>(msg.wParam);
+}
+LRESULT CALLBACK MainWindow::WindowProc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
+    auto app=reinterpret_cast<MainWindow*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
+    if(msg==WM_NCCREATE) {
+        app=static_cast<MainWindow*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
+        app->window_=hwnd; SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(app));
+    }
+    return app?app->message(msg,wp,lp):DefWindowProcW(hwnd,msg,wp,lp);
+}
+
+
+
+void MainWindow::setFonts() {
+    for(auto font:{font_,titleFont_,boldFont_,smallFont_,brandFont_}) if(font) DeleteObject(font);
+    auto make=[&](int size,int weight) { return CreateFontW(-d(size),0,0,0,weight,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Microsoft YaHei UI"); };
+    font_=make(15,FW_NORMAL);titleFont_=make(27,FW_BOLD);boldFont_=make(17,FW_BOLD);smallFont_=make(13,FW_NORMAL);
+    brandFont_=make(18,FW_SEMIBOLD);
+    for(auto [id,handle]:controls_) { (void)id; SendMessageW(handle,WM_SETFONT,reinterpret_cast<WPARAM>(font_),TRUE); }
+}
+
+
+
+
+
+
+
+
+
+
+void MainWindow::readSoundSettings() {
+    for(auto [id,key]:SoundOptions)cfg_[key]=SendMessageW(control(id),BM_GETCHECK,0,0)==BST_CHECKED;
+}
+void MainWindow::readModelSettings() {
+    const std::vector<std::string> models{"whisper-large-v3","qwen3-asr","whisper-turbo"};
+    int speech=static_cast<int>(SendMessageW(control(SpeechChoice),CB_GETCURSEL,0,0));
+    int review=static_cast<int>(SendMessageW(control(ReviewChoice),CB_GETCURSEL,0,0));
+    cfg_["speech_model"]=models.at(std::clamp(speech,0,2));
+    cfg_["review_model_id"]=models.at(std::clamp(review,0,1));
+    const std::vector<std::string> paths{"models/whisper-review","models/qwen-asr","models/whisper-turbo"};
+    cfg_["whisper_model"]=paths.at(std::clamp(speech,0,2));cfg_["review_model"]=paths.at(std::clamp(review,0,1));
+}
+void MainWindow::readSettings() {
+    readModelSettings();
+    const std::vector<std::string> outputs{"auto","audio","video"};
+    cfg_["output_kind"]=outputs.at(std::clamp(static_cast<int>(SendMessageW(control(OutputKind),CB_GETCURSEL,0,0)),0,2));
+    auto resolve=[&](std::wstring input) {
+        if(input.size()>=2&&input.front()==L'\"'&&input.back()==L'\"') input=input.substr(1,input.size()-2);
+        if(input.empty()) return std::string{};
+        fs::path path(input);if(path.is_relative()) path=root_/path;
+        return Utf8(path.lexically_normal().wstring());
+    };
+    cfg_["input"]=resolve(value(Input)); cfg_["output_dir"]=resolve(value(Output));
+    const std::vector<std::string> languages{"auto","ko","ja","zh","en"},devices{"auto","cuda","cpu"};
+    auto lang=static_cast<int>(SendMessageW(control(Language),CB_GETCURSEL,0,0)),device=static_cast<int>(SendMessageW(control(Device),CB_GETCURSEL,0,0));
+    cfg_["language"]=languages.at(std::clamp(lang,0,4)); cfg_["device"]=devices.at(std::clamp(device,0,2));
+    struct Parameter { int id; const char* key; double min,max; };
+    for(auto p:std::vector<Parameter>{{Before,"strict_pre",0,60},{After,"strict_post",0,60},{Minimum,"strict_min_section",1,600},{DenseGap,"strict_dense_gap",0,120},{Silence,"silence_seconds",2.3,120},{SilenceDb,"silence_db",-100,-20}}) {
+        
+        auto input=value(p.id);size_t used=0;double n=std::stod(input,&used);
+        if(used!=input.size()||!std::isfinite(n)||n<p.min||n>p.max) throw std::runtime_error("Invalid numeric parameter: "+std::string(p.key));
+        cfg_[p.key]=n;
+    }
+    cfg_["review_enabled"]=SendMessageW(control(Audit),BM_GETCHECK,0,0)==BST_CHECKED;
+    readSoundSettings();
+    cfg_["proxy_enabled"]=SendMessageW(control(ProxyEnabled),BM_GETCHECK,0,0)==BST_CHECKED;
+    cfg_["proxy_url"]=Utf8(value(ProxyUrl));
+}
+void MainWindow::saveSettings() {
+    if(testing()) return;
+    WriteJson(root_/L"config/user.json",cfg_);
+}
+void MainWindow::appendLog(const std::wstring& content) {
+    if(GetWindowTextLengthW(control(Log))>120000) text(Log,L"较早日志已收起，完整日志保存在 runtime/logs。\r\n");
+    SendMessageW(control(Log),EM_SETSEL,static_cast<WPARAM>(-1),static_cast<LPARAM>(-1));
+    auto line=content+L"\r\n";
+    SendMessageW(control(Log),EM_REPLACESEL,FALSE,reinterpret_cast<LPARAM>(line.c_str()));
+}
+void MainWindow::chooseFile(bool folder) {
+    ComPtr<IFileOpenDialog> dialog;
+    if(FAILED(CoCreateInstance(CLSID_FileOpenDialog,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&dialog)))) return;
+    DWORD flags=0;dialog->GetOptions(&flags);
+    dialog->SetOptions(flags|FOS_FORCEFILESYSTEM|(folder?FOS_PICKFOLDERS:FOS_FILEMUSTEXIST));
+    dialog->SetTitle(folder?L"选择剪辑结果保存目录":L"选择音频或视频");
+    if(!folder) { COMDLG_FILTERSPEC filter[]={
+        {L"音频与视频",L"*.m4a;*.mp4;*.mov;*.mkv;*.webm;*.avi;*.flv;*.ts;*.m2ts;*.mp3;*.flac;*.wav;*.ogg;*.opus;*.mka"},
+        {L"视频文件",L"*.mp4;*.mov;*.mkv;*.webm;*.avi;*.flv;*.ts;*.m2ts"},
+        {L"音频文件",L"*.m4a;*.mp3;*.flac;*.wav;*.ogg;*.opus;*.mka"},{L"所有文件",L"*.*"}};dialog->SetFileTypes(4,filter); }
+    if(SUCCEEDED(dialog->Show(window_))) {
+        ComPtr<IShellItem> item;
+        PWSTR path=nullptr;
+        if(SUCCEEDED(dialog->GetResult(&item))&&SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH,&path))) { text(folder?Output:Input,path);CoTaskMemFree(path); }
+    }
+}
+void MainWindow::start(bool doctor) {
+    if(doctor) {environmentTask("inspect");return;}
+    if(busy_) return;
+    try {
+        readSettings();
+        if(!fs::is_regular_file(fs::path(Wide(cfg_["input"])))||value(Output).empty()) throw std::runtime_error("请选择存在的音频或视频文件和输出目录。");
+        auto python=environment_.contains("python")?fs::path(Wide(environment_["python"])):root_/L"runtime/venv/Scripts/python.exe";
+        if(!fs::exists(python)) python=root_/L"runtime/python/python.exe";
+        if(!fs::exists(python)||!environmentReady()) {selectPage(2);throw std::runtime_error("请在运行环境页面点击「补齐环境」。");}
+        saveSettings();
+        fs::create_directories(root_/L"runtime/jobs");fs::create_directories(root_/L"runtime/logs");
+        std::wstring token=std::to_wstring(GetCurrentProcessId())+L"_"+std::to_wstring(GetTickCount64());
+        auto job=root_/L"runtime/jobs"/(token+L".json");WriteJson(job,cfg_);
+        cancelled_=false;completed_=false;checking_=false;eventCount_=0;activeAction_="run";downloadStatus_.clear();notice_=true;
+        status_=L"正在准备本地音频分析…";SendMessageW(control(Progress),PBM_SETPOS,0,0);
+        appendLog(L"开始剪辑 · "+Wide(cfg_.value("mode","relaxed")=="strict"?"严格模式 V2":cfg_.value("mode","")=="extract"?"提取模式 V4":"宽松模式 V3"));
+        enableControls(true);
+        runner_.start(window_,python,{L"-X",L"utf8",L"-u",(root_/L"engine/main.py").wstring(),L"run",L"--config",job.wstring()},root_,root_/L"runtime/logs"/(token+L".log"));
+    } catch(const std::exception& e) {
+        enableControls(false);notice_=true;status_=Wide(e.what());appendLog(L"无法开始："+status_);InvalidateRect(window_,nullptr,FALSE);
+        if(testing()) finishTest(1);
+    }
+}
+
+void MainWindow::environmentTask(const std::string& action,const std::string& component) {
+    if(busy_) return;
+    try {
+        // Environment operations do not depend on valid audio form fields.
+        cfg_["proxy_enabled"]=SendMessageW(control(ProxyEnabled),BM_GETCHECK,0,0)==BST_CHECKED;
+        cfg_["proxy_url"]=Utf8(value(ProxyUrl));saveSettings();
+        fs::create_directories(root_/L"runtime/jobs");fs::create_directories(root_/L"runtime/logs");
+        auto token=L"environment_"+std::to_wstring(GetCurrentProcessId())+L"_"+std::to_wstring(GetTickCount64());
+        auto job=root_/L"runtime/jobs"/(token+L".json");WriteJson(job,cfg_);
+        wchar_t system[MAX_PATH]{};GetSystemDirectoryW(system,MAX_PATH);
+        auto powershell=fs::path(system)/L"WindowsPowerShell/v1.0/powershell.exe";
+        activeAction_=action;cancelled_=false;completed_=false;checking_=true;eventCount_=0;downloadStatus_.clear();notice_=true;
+        status_=action=="inspect"?L"正在检测运行环境…":action=="install"?L"正在补齐运行环境…":L"正在测试下载连接…";
+        if(action=="testproxy"){proxyTested_=true;proxyResults_=json::array();proxyStatus_=L"正在测试连接…";}
+        SendMessageW(control(Progress),PBM_SETPOS,0,0);appendLog(status_);enableControls(true);
+        runner_.start(window_,powershell,{L"-NoProfile",L"-NonInteractive",L"-ExecutionPolicy",L"Bypass",L"-File",(root_/L"scripts/environment.ps1").wstring(),L"-Action",Wide(action),L"-Config",job.wstring(),L"-Component",Wide(component)},root_,root_/L"runtime/logs"/(token+L".log"));
+    } catch(const std::exception& e) {
+        enableControls(false);notice_=true;status_=Wide(e.what());appendLog(status_);InvalidateRect(window_,nullptr,FALSE);if(testing())finishTest(1);
+    }
+}
+
+void MainWindow::receive(const std::string& line) {
+    auto data=json::parse(line,nullptr,false);
+    if(data.is_discarded()||!data.is_object()) {if(!line.empty())appendLog(Wide(line));return;}
+    ++eventCount_;auto type=data.value("type","");std::wstring msg=Wide(data.value("message",""));
+    if(data.contains("progress")) SendMessageW(control(Progress),PBM_SETPOS,static_cast<WPARAM>(std::clamp(data["progress"].get<double>(),0.,100.)*10),0);
+    if(!msg.empty()) {appendLog(msg);status_=msg;}
+    if(type=="component") {
+        components_[data.value("id","")]=data;
+    } else if(type=="environment") {
+        environment_=data;
+        if(data.contains("components")) for(auto& c:data["components"]) components_[c["id"]]=c;
+        if(activeAction_=="inspect") completed_=true;
+    } else if(type=="setup_complete") completed_=true;
+    else if(type=="download") {
+        double bytes=data.value("downloaded",data.value("bytes",0.)),total=data.value("total",0.),speed=data.value("bytes_per_second",data.value("speed",0.));
+        std::wostringstream out;out<<std::fixed<<std::setprecision(1)<<bytes/1048576<<L" / "<<total/1048576<<L" MB";
+        if(speed>0) out<<L"   ·   "<<speed/1048576<<L" MB/s";downloadStatus_=out.str();
+    } else if(type=="proxy_result") {
+        completed_=true;proxyStatus_=data.value("ok",false)?L"连接测试通过":L"部分连接失败";
+        const auto& rows=data.contains("results")?data["results"]:data.value("checks",json::array());proxyResults_=rows;
+        for(const auto& row:rows) {
+            if(!row.value("ok",false)) appendLog(Wide(row.value("detail",row.value("error",""))));
+        }
+    } else if(type=="complete") {
+        lastResult_=data;completed_=true;EnableWindow(control(Cancel),FALSE);
+        status_=L"完成 · "+Duration(data.value("duration",0.))+L" · "+std::to_wstring(data.value("segments",0))+L" 段";
+        auto review=data.value("speech_review",json::object());
+        if(review.value("status","")=="needs_review")status_+=L" · "+std::to_wstring(review.value("findings",json::array()).size())+L" 处待复听";
+        appendLog(L"结果："+Wide(data.value("output","")));
+        if(data.value("join_review_count",0)>0) appendLog(L"有接缝建议复听，具体位置见校验报告。");
+        SYSTEMTIME now{};GetLocalTime(&now);wchar_t stamp[32]{};swprintf_s(stamp,L"%04u-%02u-%02u  %02u:%02u",now.wYear,now.wMonth,now.wDay,now.wHour,now.wMinute);
+        lastResult_["finished_at"]=Utf8(stamp);lastResult_["mode"]=cfg_.value("mode","relaxed");
+        history_.insert(history_.begin(),lastResult_);if(history_.size()>100)history_.erase(history_.begin()+100,history_.end());
+        if(!testing()) {try {WriteJson(root_/L"config/history.json",history_);}catch(const std::exception& e){appendLog(L"记录保存失败："+Wide(e.what()));}}
+        updateHistory();if(!testing())selectPage(1);
+    }
+    if(type=="error"){notice_=true;status_=L"处理失败："+msg;if(activeAction_=="testproxy")proxyStatus_=msg;}
+    if(type=="component"||type=="environment"||type=="proxy_result"){updateVisibility();layout();}
+    InvalidateRect(window_,nullptr,FALSE);
+}
+
+void MainWindow::prompt() {
+    const bool strict=cfg_.value("mode","relaxed")=="strict";
+    const bool extract=cfg_.value("mode","")=="extract";
+    auto path=root_/L"docs/prompts"/(strict?L"strict-v2.txt":extract?L"extract-v4.txt":L"relaxed-v3.txt");
+    std::ifstream file(path,std::ios::binary);
+    std::string raw((std::istreambuf_iterator<char>(file)),std::istreambuf_iterator<char>());
+    std::wstring content=Wide(raw);
+    if(strict) content+=L"\n\n当前界面参数：前余量 "+value(Before)+L" 秒；后余量 "+value(After)+L" 秒；最短连续片段 "+value(Minimum)+L" 秒；聊天合并间隔 "+value(DenseGap)+L" 秒。";
+    content+=L"\n长静音阈值："+value(Silence)+L" 秒。";
+    content+=L"\n\n当前保留声音（说话声始终删除）：";
+    bool any=false;
+    for(auto [id,key]:SoundOptions)if(SendMessageW(control(id),BM_GETCHECK,0,0)==BST_CHECKED){if(any)content+=L"、";content+=value(id);any=true;}
+    if(!any)content+=L"无";
+    content+=L"。当前选择优先于默认设置；与说话重叠或无法自然衔接的片段仍可能被一起剪掉。";
+    content+=L"\n成片大模型复核："+std::wstring(extract||SendMessageW(control(Audit),BM_GETCHECK,0,0)==BST_CHECKED?L"开启":L"关闭")+L"。";
+    std::wstring crlf;
+    for(auto c:content) { if(c==L'\n') crlf.push_back(L'\r');crlf.push_back(c); }
+    PromptState state{crlf,font_};
+    WNDCLASSW wc{};wc.lpfnWndProc=PromptProc;wc.hInstance=instance_;wc.lpszClassName=L"ASMRCLIP.Prompt";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);RegisterClassW(&wc);
+    auto popup=CreateWindowExW(WS_EX_DLGMODALFRAME,wc.lpszClassName,strict?L"严格模式（V2）提示词":extract?L"提取模式（V4）提示词":L"宽松模式（V3）提示词",WS_OVERLAPPEDWINDOW|WS_VISIBLE,CW_USEDEFAULT,CW_USEDEFAULT,d(790),d(710),window_,nullptr,instance_,&state);
+    EnableWindow(window_,FALSE);
+    MSG message{};
+    while(IsWindow(popup)&&GetMessageW(&message,nullptr,0,0)>0) {
+        if(!IsDialogMessageW(popup,&message)) { TranslateMessage(&message);DispatchMessageW(&message); }
+    }
+    EnableWindow(window_,TRUE);SetForegroundWindow(window_);
+}
+void MainWindow::screenshot(const fs::path& path,HWND popup) {
+    RECT rect{};GetClientRect(window_,&rect);
+    HDC dc=GetDC(window_),memory=CreateCompatibleDC(dc);
+    HBITMAP bitmap=CreateCompatibleBitmap(dc,rect.right,rect.bottom);
+    auto old=SelectObject(memory,bitmap);
+    // Render this application's own client and controls. This also works for
+    // hidden smoke-test windows without relying on the desktop compositor.
+    paint(memory);
+    for(auto [id,child]:controls_) {
+        if(!(GetWindowLongPtrW(child,GWL_STYLE)&WS_VISIBLE))continue;
+        RECT r{};GetWindowRect(child,&r);
+        MapWindowPoints(nullptr,window_,reinterpret_cast<POINT*>(&r),2);
+        int saved=SaveDC(memory);
+        SetViewportOrgEx(memory,r.left,r.top,nullptr);
+        IntersectClipRect(memory,0,0,r.right-r.left,r.bottom-r.top);
+        SendMessageW(child,WM_PRINT,reinterpret_cast<WPARAM>(memory),PRF_CLIENT|PRF_NONCLIENT|PRF_CHILDREN|PRF_ERASEBKGND);
+        RestoreDC(memory,saved);
+    }
+    if(popup) {
+        RECT r{};GetWindowRect(popup,&r);MapWindowPoints(nullptr,window_,reinterpret_cast<POINT*>(&r),2);
+        int saved=SaveDC(memory);SetViewportOrgEx(memory,r.left,r.top,nullptr);
+        PrintWindow(popup,memory,0);RestoreDC(memory,saved);
+    }
+    SelectObject(memory,old);
+    UINT count=0,size=0;Gdiplus::GetImageEncodersSize(&count,&size);
+    std::vector<BYTE> encoders(size);auto info=reinterpret_cast<Gdiplus::ImageCodecInfo*>(encoders.data());Gdiplus::GetImageEncoders(count,size,info);
+    fs::create_directories(path.parent_path());
+    for(UINT i=0;i<count;++i) if(wcscmp(info[i].MimeType,L"image/png")==0) { Gdiplus::Bitmap image(bitmap,nullptr);image.Save(path.c_str(),&info[i].Clsid,nullptr);break; }
+    DeleteObject(bitmap);DeleteDC(memory);ReleaseDC(window_,dc);
+}
+void MainWindow::finishTest(DWORD code) {
+    if(options_.contains("snapshot")) screenshot(fs::path(Wide(options_["snapshot"])));
+    if(options_.contains("self-test")) screenshot(fs::path(Wide(options_["self-test"])));
+    if(options_.contains("test-report")) WriteJson(fs::path(Wide(options_["test-report"])),{{"exit_code",code},{"completed",completed_},{"events",eventCount_},{"result",lastResult_},{"controls",controls_.size()},{"page",page_},{"environment",environment_},{"proxy_result",Utf8(proxyStatus_)},
+        {"language_selection",SendMessageW(control(Language),CB_GETCURSEL,0,0)},{"device_selection",SendMessageW(control(Device),CB_GETCURSEL,0,0)}});
+    testExit_=static_cast<int>(code);DestroyWindow(window_);
+}
+LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
+    switch(msg) {
+    case WM_CREATE: dpi_=GetDpiForWindow(window_);createControls();layout();return 0;
+    case WM_SIZE: if(!controls_.empty()) layout();return 0;
+    case WM_DPICHANGED: {
+        dpi_=HIWORD(wp);auto r=reinterpret_cast<RECT*>(lp);SetWindowPos(window_,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER|SWP_NOACTIVATE);setFonts();layout();return 0;
+    }
+    case WM_GETMINMAXINFO: {
+        auto info=reinterpret_cast<MINMAXINFO*>(lp);info->ptMinTrackSize={d(1100),d(800)};return 0;
+    }
+    case WM_UPDATEUISTATE: wp=MAKEWPARAM(UIS_SET,UISF_HIDEFOCUS);break;
+    case WM_ERASEBKGND: return 1;
+    case WM_PAINT: { PAINTSTRUCT ps{};HDC dc=BeginPaint(window_,&ps);paint(dc);EndPaint(window_,&ps);return 0; }
+    case WM_PRINTCLIENT: paint(reinterpret_cast<HDC>(wp));return 0;
+    case WM_SETCURSOR:
+        if(LOWORD(lp)==HTCLIENT) {
+            POINT point{};GetCursorPos(&point);ScreenToClient(window_,&point);
+            if(inputAt(point)) {SetCursor(LoadCursorW(nullptr,IDC_IBEAM));return TRUE;}
+        }
+        break;
+    case WM_LBUTTONDOWN: {
+        POINT point{static_cast<short>(LOWORD(lp)),static_cast<short>(HIWORD(lp))};
+        if(auto edit=inputAt(point)) {
+            RECT client{};GetClientRect(edit,&client);MapWindowPoints(window_,edit,&point,1);
+            point.x=std::clamp<LONG>(point.x,0,client.right-1);point.y=client.bottom/2;
+            SendMessageW(edit,WM_LBUTTONDOWN,wp,MAKELPARAM(point.x,point.y));return 0;
+        }
+        break;
+    }
+    case WM_DRAWITEM: {auto item=reinterpret_cast<DRAWITEMSTRUCT*>(lp);if(!DrawChoiceMenuItem(item))drawButton(item);return TRUE;}
+    case WM_MEASUREITEM: {auto item=reinterpret_cast<MEASUREITEMSTRUCT*>(lp);if(!MeasureChoiceMenuItem(item))item->itemHeight=d(item->CtlID==History?66:24);return TRUE;}
+    case WM_ENTERIDLE:
+        if(wp==MSGF_MENU&&dropdownTestId_)testDropdownIdle(reinterpret_cast<HWND>(lp));
+        break;
+    case WM_CTLCOLORSTATIC: case WM_CTLCOLOREDIT: {
+        auto dc=reinterpret_cast<HDC>(wp);SetTextColor(dc,Ink);
+        bool bg=reinterpret_cast<HWND>(lp)==control(ModeText)||!IsWindowEnabled(reinterpret_cast<HWND>(lp));SetBkColor(dc,bg?Bg:White);
+        return reinterpret_cast<LRESULT>(bg?background_:white_);
+    }
+    case WM_DROPFILES: {
+        auto drop=reinterpret_cast<HDROP>(wp);wchar_t file[32768]{};
+        if(!busy_&&DragQueryFileW(drop,0,file,32768)) {text(Input,file);selectPage(0);}
+        DragFinish(drop);return 0;
+    }
+    case WM_COMMAND: {
+        int id=LOWORD(wp);
+        if(id==ProxyUrl&&HIWORD(wp)==EN_CHANGE&&!busy_) {
+            proxyTested_=false;proxyResults_=json::array();proxyStatus_.clear();
+            if(activeAction_=="testproxy")notice_=false;
+            layout();return 0;
+        }
+        if(id==History&&HIWORD(wp)==LBN_SELCHANGE) {selectHistory();return 0;}
+        if(HIWORD(wp)!=BN_CLICKED) break;
+        if(id>=NavTask&&id<=NavLogs) {selectPage(id-NavTask);return 0;}
+        if(id==SettingsAudio||id==SettingsNetwork||id==SettingsSounds) {selectPage(3,id==SettingsNetwork?1:id==SettingsSounds?2:0);return 0;}
+        if(id==EnvironmentBase||id==EnvironmentModels) {
+            environmentTab_=id==EnvironmentModels?1:0;selectPage(2);return 0;
+        }
+        if(id==SpeechChoice||id==ReviewChoice) {
+            showChoices(id);readModelSettings();saveSettings();updateVisibility();layout();return 0;
+        }
+        if(id==EditSettings||id==NetworkSettings) {selectPage(3,id==NetworkSettings?1:0);return 0;}
+        if(id==Install) {environmentTask("install");return 0;}
+        if(id>=RepairPython&&id<=RepairFfmpeg) {const char* keys[]={"python","dependencies","whisper","ast","ffmpeg"};environmentTask("install",keys[id-RepairPython]);return 0;}
+        if(id==RepairReview){environmentTask("install","review");return 0;}
+        if(id>=RepairQwen&&id<=RepairNeural){const char* keys[]={"qwen","aligner","clap","neural"};environmentTask("install",keys[id-RepairQwen]);return 0;}
+        if(id==TestProxy) {environmentTask("testproxy");return 0;}
+        if(id==ProxyEnabled||id==Audit||IsSoundOption(id)){
+            SendMessageW(control(id),BM_SETCHECK,SendMessageW(control(id),BM_GETCHECK,0,0)==BST_CHECKED?BST_UNCHECKED:BST_CHECKED,0);
+            if(id==ProxyEnabled){proxyTested_=false;proxyResults_=json::array();proxyStatus_.clear();if(activeAction_=="testproxy")notice_=false;}
+            enableControls(busy_);return 0;
+        }
+        if(id==Language||id==Device||id==OutputKind){showChoices(id);return 0;}
+        if(id==NewTask){selectPage(0);return 0;}
+        if(id==Save) {
+            try {
+                if(settingsTab_==1) {cfg_["proxy_enabled"]=SendMessageW(control(ProxyEnabled),BM_GETCHECK,0,0)==BST_CHECKED;cfg_["proxy_url"]=Utf8(value(ProxyUrl));}
+                else if(settingsTab_==2)readSoundSettings();
+                else readSettings();
+                saveSettings();notice_=true;status_=L"设置已保存。";
+            }catch(const std::exception& e){notice_=true;status_=L"无法保存："+Wide(e.what());}
+            InvalidateRect(window_,nullptr,FALSE);return 0;
+        }
+        if(id==Reset) {
+            try {auto defaults=ReadJson(root_/L"config/defaults.json");
+                if(settingsTab_==2)for(auto option:SoundOptions)cfg_[option.second]=defaults[option.second];
+                else for(auto key:settingsTab_==1?std::vector<std::string>{"proxy_enabled","proxy_url"}:std::vector<std::string>{"language","device","silence_seconds","silence_db","review_enabled","strict_pre","strict_post","strict_min_section","strict_dense_gap"}) cfg_[key]=defaults[key];
+                populateSettings(settingsTab_);enableControls(busy_);saveSettings();notice_=true;status_=L"已恢复默认设置。";
+            }catch(const std::exception& e){status_=Wide(e.what());}InvalidateRect(window_,nullptr,FALSE);return 0;
+        }
+        if(id==ClearLog) {text(Log,L"");return 0;}
+        if(id==OpenLogs) {auto path=root_/L"runtime/logs";fs::create_directories(path);ShellExecuteW(window_,L"open",path.c_str(),nullptr,nullptr,SW_SHOWNORMAL);return 0;}
+        if(id==BrowseInput) chooseFile(false);
+        else if(id==BrowseOutput) chooseFile(true);
+        else if(id==Strict||id==Relaxed||id==Extract) { cfg_["mode"]=id==Strict?"strict":id==Extract?"extract":"relaxed";refreshMode(); }
+        else if(id==Prompt) prompt();
+        else if(id==Start) start(false);
+        else if(id==Doctor) start(true);
+        else if(id==Cancel&&busy_) { cancelled_=true;status_=L"正在取消，已完成的文件和缓存将保留…";EnableWindow(control(Cancel),FALSE);runner_.cancel();InvalidateRect(window_,nullptr,FALSE); }
+        else if(id==OpenOutput) {
+            fs::path dir=lastResult_.contains("output")?fs::path(Wide(lastResult_["output"])).parent_path():fs::path(value(Output));
+            if(fs::is_directory(dir)) ShellExecuteW(window_,L"open",dir.c_str(),nullptr,nullptr,SW_SHOWNORMAL);
+            else appendLog(L"输出目录尚未创建，完成首次剪辑后即可打开。");
+        } else if((id==Play||id==Mapping||id==ReviewFindings)&&lastResult_.contains("output")) {
+            fs::path target=Wide(lastResult_["output"]);if(id==Mapping) target=target.parent_path()/L"剪辑时间对照.csv";
+            if(id==ReviewFindings)target=target.parent_path()/L"人声复核.csv";
+            if(fs::exists(target)) ShellExecuteW(window_,L"open",target.c_str(),nullptr,nullptr,SW_SHOWNORMAL);
+        }
+        return 0;
+    }
+    case WM_ENGINE_LINE: { std::unique_ptr<std::string> line(reinterpret_cast<std::string*>(lp));receive(*line);return 0; }
+    case WM_ENGINE_DONE: {
+        runner_.finish();
+        if(activeAction_=="inspect"&&wp==0&&completed_&&!cancelled_)notice_=false;
+        if(activeAction_=="testproxy"&&completed_&&!cancelled_)notice_=false;
+        if(cancelled_||wp!=0) {
+            for(auto& [key,component]:components_) {
+                (void)key;auto state=component.value("status","");
+                if(state=="checking"||state=="downloading") {component["status"]="missing";component["detail"]=cancelled_?"任务已取消，可以重新检测或下载":"任务未完成，请查看日志后重试";}
+            }
+            if(cancelled_&&activeAction_=="testproxy") proxyStatus_=L"连接测试已取消，可以重新测试。";
+        }
+        enableControls(false);
+        if(cancelled_) { notice_=true;status_=L"任务已取消。";appendLog(status_); }
+        else if(wp!=0||!completed_) { if(status_.find(L"失败")==std::wstring::npos) status_=L"处理未完成，请查看日志。"; }
+        InvalidateRect(window_,nullptr,FALSE);
+        if(testing()) finishTest(wp==0&&completed_?0:1);
+        return 0;
+    }
+    case WM_TIMER:
+        KillTimer(window_,1);
+        if(options_.contains("test-dropdowns")) testDropdowns();
+        else if(options_.contains("test-controls")) testControls();
+        else if(options_.contains("test-navigation")) testNavigationRendering();
+        else if(options_.contains("test-job")) start(false);
+        else if(options_.contains("self-test")) start(true);
+        else if(options_.contains("test-action")) environmentTask(options_["test-action"],options_.value("test-component","all"));
+        else if(options_.contains("snapshot")) {if(options_.contains("focus-mode"))SetFocus(control(Relaxed));finishTest(0);}
+        else environmentTask("inspect");
+        return 0;
+    case WM_CLOSE:
+        try { readSettings();saveSettings(); } catch (...) {}
+        runner_.cancel();runner_.finish();DestroyWindow(window_);return 0;
+    case WM_DESTROY: {
+        MSG pending{};
+        while(PeekMessageW(&pending,window_,WM_ENGINE_LINE,WM_ENGINE_LINE,PM_REMOVE)) delete reinterpret_cast<std::string*>(pending.lParam);
+        PostQuitMessage(testExit_);return 0;
+    }
+    }
+    return DefWindowProcW(window_,msg,wp,lp);
+}

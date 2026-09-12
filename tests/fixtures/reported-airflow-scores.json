@@ -1,0 +1,946 @@
+[
+  {
+    "start": 4920,
+    "end": 4926,
+    "top": {
+      "Gasp": 0.3086,
+      "Snort": 0.0717,
+      "Inside, small room": 0.0491,
+      "Speech": 0.0388,
+      "Wheeze": 0.0288,
+      "Crunch": 0.0231,
+      "Sigh": 0.0198,
+      "Chewing, mastication": 0.0195,
+      "Wail, moan": 0.0185,
+      "Biting": 0.0128
+    }
+  },
+  {
+    "start": 4922,
+    "end": 4928,
+    "top": {
+      "Crunch": 0.1969,
+      "Gasp": 0.1819,
+      "Chewing, mastication": 0.1456,
+      "Biting": 0.1092,
+      "Wheeze": 0.0874,
+      "Snort": 0.0616,
+      "Inside, small room": 0.055,
+      "Speech": 0.0379,
+      "Wail, moan": 0.0334,
+      "Whimper": 0.0178
+    }
+  },
+  {
+    "start": 4924,
+    "end": 4930,
+    "top": {
+      "Gasp": 0.1842,
+      "Crunch": 0.1338,
+      "Wheeze": 0.0563,
+      "Chewing, mastication": 0.0507,
+      "Speech": 0.0369,
+      "Wail, moan": 0.0335,
+      "Snort": 0.0313,
+      "Inside, small room": 0.0297,
+      "Biting": 0.0241,
+      "Whimper": 0.0209
+    }
+  },
+  {
+    "start": 4926,
+    "end": 4932,
+    "top": {
+      "Crunch": 0.2229,
+      "Chewing, mastication": 0.0997,
+      "Gasp": 0.0879,
+      "Biting": 0.0872,
+      "Speech": 0.0755,
+      "Inside, small room": 0.0396,
+      "Wheeze": 0.0383,
+      "Snort": 0.0264,
+      "Whimper": 0.0169,
+      "Tearing": 0.0152
+    }
+  },
+  {
+    "start": 4928,
+    "end": 4934,
+    "top": {
+      "Crunch": 0.2089,
+      "Speech": 0.1811,
+      "Biting": 0.1696,
+      "Gasp": 0.1118,
+      "Chewing, mastication": 0.099,
+      "Snort": 0.0644,
+      "Inside, small room": 0.0291,
+      "Wheeze": 0.0176,
+      "Sound effect": 0.0153,
+      "Tearing": 0.0121
+    }
+  },
+  {
+    "start": 4930,
+    "end": 4936,
+    "top": {
+      "Crunch": 0.2803,
+      "Biting": 0.1942,
+      "Chewing, mastication": 0.1472,
+      "Speech": 0.1317,
+      "Gasp": 0.0838,
+      "Inside, small room": 0.0474,
+      "Snort": 0.0394,
+      "Sound effect": 0.0232,
+      "Tearing": 0.0173,
+      "Scrape": 0.0137
+    }
+  },
+  {
+    "start": 4932,
+    "end": 4938,
+    "top": {
+      "Crunch": 0.4342,
+      "Biting": 0.2207,
+      "Chewing, mastication": 0.1675,
+      "Speech": 0.083,
+      "Scrape": 0.0597,
+      "Inside, small room": 0.0446,
+      "Sound effect": 0.0428,
+      "Gasp": 0.032,
+      "Tearing": 0.0245,
+      "Crackle": 0.0197
+    }
+  },
+  {
+    "start": 4934,
+    "end": 4940,
+    "top": {
+      "Crunch": 0.2713,
+      "Biting": 0.1028,
+      "Tearing": 0.0638,
+      "Chewing, mastication": 0.059,
+      "Inside, small room": 0.0468,
+      "Speech": 0.0423,
+      "Scrape": 0.0395,
+      "Crumpling, crinkling": 0.0256,
+      "Crack": 0.0209,
+      "Crackle": 0.0199
+    }
+  },
+  {
+    "start": 4936,
+    "end": 4942,
+    "top": {
+      "Crunch": 0.1276,
+      "Tearing": 0.0791,
+      "Gasp": 0.0759,
+      "Chewing, mastication": 0.0497,
+      "Snort": 0.0413,
+      "Crumpling, crinkling": 0.039,
+      "Inside, small room": 0.0343,
+      "Biting": 0.029,
+      "Scrape": 0.0275,
+      "Speech": 0.022
+    }
+  },
+  {
+    "start": 4938,
+    "end": 4944,
+    "top": {
+      "Crunch": 0.0803,
+      "Tearing": 0.0738,
+      "Gasp": 0.0603,
+      "Chewing, mastication": 0.044,
+      "Zipper (clothing)": 0.0323,
+      "Sigh": 0.0268,
+      "Inside, small room": 0.0184,
+      "Sound effect": 0.0151,
+      "Scrape": 0.0139,
+      "Speech": 0.0119
+    }
+  },
+  {
+    "start": 4940,
+    "end": 4946,
+    "top": {
+      "Gasp": 0.1098,
+      "Chewing, mastication": 0.0428,
+      "Sneeze": 0.0225,
+      "Snort": 0.0218,
+      "Sigh": 0.0209,
+      "Speech": 0.0201,
+      "Breathing": 0.0187,
+      "Inside, small room": 0.0121,
+      "Writing": 0.0105,
+      "Biting": 0.0084
+    }
+  },
+  {
+    "start": 4942,
+    "end": 4948,
+    "top": {
+      "Gasp": 0.1621,
+      "Chewing, mastication": 0.1176,
+      "Sigh": 0.1086,
+      "Inside, small room": 0.0472,
+      "Sneeze": 0.0278,
+      "Biting": 0.0273,
+      "Snort": 0.0221,
+      "Crunch": 0.0204,
+      "Speech": 0.0153,
+      "Breathing": 0.0085
+    }
+  },
+  {
+    "start": 4944,
+    "end": 4950,
+    "top": {
+      "Gasp": 0.4687,
+      "Snort": 0.2485,
+      "Breathing": 0.1704,
+      "Sigh": 0.0806,
+      "Chewing, mastication": 0.0662,
+      "Sneeze": 0.0381,
+      "Biting": 0.028,
+      "Speech": 0.0276,
+      "Spray": 0.0267,
+      "Inside, small room": 0.0262
+    }
+  },
+  {
+    "start": 4946,
+    "end": 4952,
+    "top": {
+      "Gasp": 0.515,
+      "Breathing": 0.1848,
+      "Snort": 0.1658,
+      "Sigh": 0.0903,
+      "Sneeze": 0.0261,
+      "Spray": 0.0245,
+      "Hiss": 0.0226,
+      "Speech": 0.0201,
+      "Inside, small room": 0.0176,
+      "Wheeze": 0.0163
+    }
+  },
+  {
+    "start": 4948,
+    "end": 4954,
+    "top": {
+      "Gasp": 0.5249,
+      "Sigh": 0.1011,
+      "Snort": 0.0963,
+      "Sneeze": 0.0777,
+      "Breathing": 0.0512,
+      "Speech": 0.043,
+      "Wheeze": 0.0325,
+      "Spray": 0.0178,
+      "Inside, small room": 0.011,
+      "Animal": 0.0089
+    }
+  },
+  {
+    "start": 4950,
+    "end": 4956,
+    "top": {
+      "Spray": 0.251,
+      "Speech": 0.0816,
+      "Gasp": 0.0567,
+      "Sneeze": 0.0339,
+      "Inside, small room": 0.0249,
+      "Breathing": 0.018,
+      "Single-lens reflex camera": 0.0172,
+      "Camera": 0.0095,
+      "Snort": 0.0086,
+      "Shuffling cards": 0.0085
+    }
+  },
+  {
+    "start": 4952,
+    "end": 4958,
+    "top": {
+      "Sigh": 0.2606,
+      "Gasp": 0.2136,
+      "Sneeze": 0.065,
+      "Breathing": 0.0255,
+      "Speech": 0.0219,
+      "Snort": 0.018,
+      "Inside, small room": 0.0113,
+      "Spray": 0.0089,
+      "Wheeze": 0.0053,
+      "Computer keyboard": 0.0038
+    }
+  },
+  {
+    "start": 4954,
+    "end": 4960,
+    "top": {
+      "Sigh": 0.4701,
+      "Gasp": 0.2194,
+      "Breathing": 0.0662,
+      "Sneeze": 0.0367,
+      "Spray": 0.0198,
+      "Speech": 0.0196,
+      "Inside, small room": 0.014,
+      "Snort": 0.012,
+      "Scissors": 0.0075,
+      "Single-lens reflex camera": 0.0068
+    }
+  },
+  {
+    "start": 4956,
+    "end": 4962,
+    "top": {
+      "Sigh": 0.3902,
+      "Gasp": 0.1056,
+      "Chewing, mastication": 0.068,
+      "Inside, small room": 0.0481,
+      "Breathing": 0.042,
+      "Crunch": 0.03,
+      "Snort": 0.0225,
+      "Sneeze": 0.0223,
+      "Speech": 0.0178,
+      "Tearing": 0.0149
+    }
+  },
+  {
+    "start": 4958,
+    "end": 4964,
+    "top": {
+      "Sigh": 0.1532,
+      "Gasp": 0.1239,
+      "Breathing": 0.0668,
+      "Spray": 0.0668,
+      "Speech": 0.0318,
+      "Inside, small room": 0.0253,
+      "Chewing, mastication": 0.0166,
+      "Snort": 0.0112,
+      "Tearing": 0.0112,
+      "Sneeze": 0.0104
+    }
+  },
+  {
+    "start": 4960,
+    "end": 4966,
+    "top": {
+      "Spray": 0.4691,
+      "Steam": 0.0391,
+      "Hiss": 0.0375,
+      "Breathing": 0.0275,
+      "Inside, small room": 0.0273,
+      "Speech": 0.0241,
+      "Rub": 0.0162,
+      "Tearing": 0.0153,
+      "Scrape": 0.0118,
+      "Static": 0.0114
+    }
+  },
+  {
+    "start": 4962,
+    "end": 4968,
+    "top": {
+      "Spray": 0.2427,
+      "Rub": 0.0695,
+      "Breathing": 0.0663,
+      "Hiss": 0.0655,
+      "Steam": 0.0269,
+      "Gasp": 0.0215,
+      "Sanding": 0.017,
+      "Snake": 0.0143,
+      "Snort": 0.0124,
+      "Sneeze": 0.0097
+    }
+  },
+  {
+    "start": 4964,
+    "end": 4970,
+    "top": {
+      "Gasp": 0.1764,
+      "Breathing": 0.1129,
+      "Spray": 0.0886,
+      "Sigh": 0.0603,
+      "Snort": 0.0544,
+      "Speech": 0.0463,
+      "Sneeze": 0.0395,
+      "Hiss": 0.0225,
+      "Inside, small room": 0.0104,
+      "Wheeze": 0.0098
+    }
+  },
+  {
+    "start": 4966,
+    "end": 4972,
+    "top": {
+      "Gasp": 0.2397,
+      "Breathing": 0.1796,
+      "Snort": 0.0966,
+      "Speech": 0.0317,
+      "Spray": 0.0299,
+      "Wheeze": 0.0281,
+      "Sigh": 0.027,
+      "Sneeze": 0.0242,
+      "Animal": 0.0236,
+      "Hiss": 0.0219
+    }
+  },
+  {
+    "start": 4968,
+    "end": 4974,
+    "top": {
+      "Gasp": 0.1462,
+      "Breathing": 0.137,
+      "Snort": 0.0936,
+      "Speech": 0.0691,
+      "Sneeze": 0.0661,
+      "Spray": 0.0429,
+      "Sigh": 0.0341,
+      "Wheeze": 0.0275,
+      "Hiss": 0.0249,
+      "Inside, small room": 0.0112
+    }
+  },
+  {
+    "start": 4970,
+    "end": 4976,
+    "top": {
+      "Breathing": 0.0638,
+      "Gasp": 0.0432,
+      "Spray": 0.0415,
+      "Sigh": 0.0345,
+      "Hiss": 0.0308,
+      "Sneeze": 0.027,
+      "Snort": 0.0251,
+      "Speech": 0.0163,
+      "Inside, small room": 0.0141,
+      "Snake": 0.0133
+    }
+  },
+  {
+    "start": 4972,
+    "end": 4978,
+    "top": {
+      "Spray": 0.2043,
+      "Breathing": 0.1437,
+      "Gasp": 0.0678,
+      "Sigh": 0.0633,
+      "Hiss": 0.0376,
+      "Snort": 0.0338,
+      "Sneeze": 0.0171,
+      "Steam": 0.0157,
+      "Camera": 0.0154,
+      "Speech": 0.0152
+    }
+  },
+  {
+    "start": 4974,
+    "end": 4980,
+    "top": {
+      "Gasp": 0.1616,
+      "Spray": 0.0999,
+      "Sigh": 0.0776,
+      "Breathing": 0.0699,
+      "Crack": 0.0424,
+      "Sound effect": 0.0323,
+      "Snort": 0.0288,
+      "Scrape": 0.0204,
+      "Chewing, mastication": 0.0137,
+      "Silence": 0.013
+    }
+  },
+  {
+    "start": 4976,
+    "end": 4982,
+    "top": {
+      "Spray": 0.2307,
+      "Gasp": 0.0591,
+      "Chewing, mastication": 0.0457,
+      "Breathing": 0.0418,
+      "Sigh": 0.0283,
+      "Speech": 0.0202,
+      "Inside, small room": 0.019,
+      "Tearing": 0.0179,
+      "Crack": 0.017,
+      "Snort": 0.0138
+    }
+  },
+  {
+    "start": 4978,
+    "end": 4984,
+    "top": {
+      "Chewing, mastication": 0.3135,
+      "Crunch": 0.2855,
+      "Biting": 0.1674,
+      "Speech": 0.1136,
+      "Sigh": 0.0311,
+      "Inside, small room": 0.0267,
+      "Tearing": 0.0202,
+      "Gasp": 0.02,
+      "Sound effect": 0.0146,
+      "Scrape": 0.0139
+    }
+  },
+  {
+    "start": 4980,
+    "end": 4986,
+    "top": {
+      "Chewing, mastication": 0.4088,
+      "Crunch": 0.3649,
+      "Biting": 0.1532,
+      "Speech": 0.0434,
+      "Inside, small room": 0.0333,
+      "Sound effect": 0.0278,
+      "Tearing": 0.02,
+      "Whispering": 0.0167,
+      "Scrape": 0.0153,
+      "Sigh": 0.0077
+    }
+  },
+  {
+    "start": 4982,
+    "end": 4988,
+    "top": {
+      "Crunch": 0.3595,
+      "Chewing, mastication": 0.2418,
+      "Biting": 0.1416,
+      "Speech": 0.1405,
+      "Whispering": 0.0678,
+      "Scrape": 0.0411,
+      "Sound effect": 0.0355,
+      "Inside, small room": 0.0282,
+      "Gasp": 0.0233,
+      "Tearing": 0.023
+    }
+  },
+  {
+    "start": 4984,
+    "end": 4990,
+    "top": {
+      "Crunch": 0.4192,
+      "Speech": 0.2756,
+      "Chewing, mastication": 0.2378,
+      "Biting": 0.2089,
+      "Whispering": 0.0428,
+      "Tearing": 0.0342,
+      "Inside, small room": 0.0337,
+      "Sound effect": 0.0121,
+      "Scrape": 0.0114,
+      "Stomach rumble": 0.0068
+    }
+  },
+  {
+    "start": 4986,
+    "end": 4992,
+    "top": {
+      "Crunch": 0.4213,
+      "Chewing, mastication": 0.2206,
+      "Biting": 0.2048,
+      "Speech": 0.0569,
+      "Sound effect": 0.0223,
+      "Tearing": 0.0206,
+      "Inside, small room": 0.0179,
+      "Scrape": 0.0163,
+      "Squish": 0.0097,
+      "Whispering": 0.0081
+    }
+  },
+  {
+    "start": 4988,
+    "end": 4994,
+    "top": {
+      "Crunch": 0.3862,
+      "Chewing, mastication": 0.2979,
+      "Biting": 0.2129,
+      "Speech": 0.0341,
+      "Sound effect": 0.0179,
+      "Inside, small room": 0.016,
+      "Tearing": 0.0113,
+      "Stomach rumble": 0.0105,
+      "Scrape": 0.006,
+      "Music": 0.0058
+    }
+  },
+  {
+    "start": 4990,
+    "end": 4996,
+    "top": {
+      "Crunch": 0.5966,
+      "Speech": 0.1506,
+      "Biting": 0.1479,
+      "Chewing, mastication": 0.1461,
+      "Tearing": 0.084,
+      "Whispering": 0.0436,
+      "Sound effect": 0.0301,
+      "Inside, small room": 0.0264,
+      "Stomach rumble": 0.0128,
+      "Scrape": 0.0123
+    }
+  },
+  {
+    "start": 4992,
+    "end": 4998,
+    "top": {
+      "Crunch": 0.4092,
+      "Speech": 0.355,
+      "Chewing, mastication": 0.174,
+      "Biting": 0.1637,
+      "Tearing": 0.1004,
+      "Whispering": 0.0662,
+      "Inside, small room": 0.0402,
+      "Sound effect": 0.0224,
+      "Scrape": 0.0127,
+      "Crumpling, crinkling": 0.0104
+    }
+  },
+  {
+    "start": 4994,
+    "end": 5000,
+    "top": {
+      "Speech": 0.395,
+      "Crunch": 0.3482,
+      "Chewing, mastication": 0.1259,
+      "Biting": 0.0867,
+      "Tearing": 0.0833,
+      "Whispering": 0.06,
+      "Inside, small room": 0.0386,
+      "Crumpling, crinkling": 0.0157,
+      "Sound effect": 0.0154,
+      "Crack": 0.007
+    }
+  },
+  {
+    "start": 4996,
+    "end": 5002,
+    "top": {
+      "Crunch": 0.2502,
+      "Chewing, mastication": 0.1141,
+      "Gasp": 0.0446,
+      "Biting": 0.0395,
+      "Crack": 0.029,
+      "Sound effect": 0.0261,
+      "Tearing": 0.0259,
+      "Inside, small room": 0.0167,
+      "Crumpling, crinkling": 0.0128,
+      "Speech": 0.0116
+    }
+  },
+  {
+    "start": 4998,
+    "end": 5004,
+    "top": {
+      "Crunch": 0.158,
+      "Chewing, mastication": 0.1017,
+      "Gasp": 0.0655,
+      "Biting": 0.0639,
+      "Snort": 0.0201,
+      "Crack": 0.0181,
+      "Sound effect": 0.0159,
+      "Crackle": 0.0158,
+      "Tearing": 0.0142,
+      "Scrape": 0.0135
+    }
+  },
+  {
+    "start": 5000,
+    "end": 5006,
+    "top": {
+      "Crunch": 0.2493,
+      "Chewing, mastication": 0.0919,
+      "Biting": 0.0538,
+      "Gasp": 0.0426,
+      "Sound effect": 0.0318,
+      "Tearing": 0.0278,
+      "Speech": 0.0125,
+      "Scrape": 0.0106,
+      "Crack": 0.0106,
+      "Whispering": 0.0093
+    }
+  },
+  {
+    "start": 5002,
+    "end": 5008,
+    "top": {
+      "Crunch": 0.5272,
+      "Biting": 0.2217,
+      "Chewing, mastication": 0.137,
+      "Sound effect": 0.0251,
+      "Speech": 0.0174,
+      "Scrape": 0.0132,
+      "Tearing": 0.0086,
+      "Whispering": 0.0071,
+      "Gasp": 0.0068,
+      "Crackle": 0.0067
+    }
+  },
+  {
+    "start": 5004,
+    "end": 5010,
+    "top": {
+      "Crunch": 0.4178,
+      "Chewing, mastication": 0.1727,
+      "Biting": 0.1369,
+      "Speech": 0.0579,
+      "Whispering": 0.0239,
+      "Sound effect": 0.0194,
+      "Scrape": 0.0089,
+      "Inside, small room": 0.0082,
+      "Tearing": 0.0079,
+      "Music": 0.0049
+    }
+  },
+  {
+    "start": 5006,
+    "end": 5012,
+    "top": {
+      "Crunch": 0.6159,
+      "Biting": 0.1882,
+      "Chewing, mastication": 0.1477,
+      "Sound effect": 0.0964,
+      "Scrape": 0.0284,
+      "Tearing": 0.0262,
+      "Speech": 0.02,
+      "Inside, small room": 0.0176,
+      "Crack": 0.0102,
+      "Crumpling, crinkling": 0.0097
+    }
+  },
+  {
+    "start": 5008,
+    "end": 5014,
+    "top": {
+      "Crunch": 0.3643,
+      "Chewing, mastication": 0.1373,
+      "Biting": 0.0776,
+      "Sound effect": 0.047,
+      "Speech": 0.0424,
+      "Inside, small room": 0.0277,
+      "Tearing": 0.0231,
+      "Crack": 0.0135,
+      "Whispering": 0.0131,
+      "Gasp": 0.0118
+    }
+  },
+  {
+    "start": 5010,
+    "end": 5016,
+    "top": {
+      "Crunch": 0.3627,
+      "Tearing": 0.1275,
+      "Chewing, mastication": 0.0861,
+      "Speech": 0.0735,
+      "Biting": 0.046,
+      "Inside, small room": 0.0399,
+      "Crumpling, crinkling": 0.034,
+      "Sound effect": 0.0335,
+      "Crack": 0.017,
+      "Whispering": 0.0154
+    }
+  },
+  {
+    "start": 5012,
+    "end": 5018,
+    "top": {
+      "Crunch": 0.3849,
+      "Biting": 0.0748,
+      "Chewing, mastication": 0.0593,
+      "Gasp": 0.0522,
+      "Speech": 0.0407,
+      "Crack": 0.0245,
+      "Crackle": 0.0205,
+      "Sound effect": 0.0185,
+      "Scrape": 0.0143,
+      "Inside, small room": 0.0106
+    }
+  },
+  {
+    "start": 5014,
+    "end": 5020,
+    "top": {
+      "Crunch": 0.3743,
+      "Tearing": 0.0998,
+      "Speech": 0.0993,
+      "Chewing, mastication": 0.0902,
+      "Biting": 0.0705,
+      "Whispering": 0.0268,
+      "Inside, small room": 0.0213,
+      "Crumpling, crinkling": 0.0185,
+      "Scrape": 0.016,
+      "Crack": 0.0124
+    }
+  },
+  {
+    "start": 5016,
+    "end": 5022,
+    "top": {
+      "Crunch": 0.3186,
+      "Biting": 0.0652,
+      "Tearing": 0.0635,
+      "Chewing, mastication": 0.0474,
+      "Inside, small room": 0.02,
+      "Crumpling, crinkling": 0.0175,
+      "Sound effect": 0.0173,
+      "Crack": 0.0137,
+      "Speech": 0.0109,
+      "Scrape": 0.0095
+    }
+  },
+  {
+    "start": 5018,
+    "end": 5024,
+    "top": {
+      "Crunch": 0.2892,
+      "Biting": 0.0948,
+      "Tearing": 0.0673,
+      "Chewing, mastication": 0.0601,
+      "Scrape": 0.0327,
+      "Sound effect": 0.0282,
+      "Inside, small room": 0.0221,
+      "Crumpling, crinkling": 0.0182,
+      "Speech": 0.0178,
+      "Crack": 0.0162
+    }
+  },
+  {
+    "start": 5020,
+    "end": 5026,
+    "top": {
+      "Crunch": 0.3054,
+      "Biting": 0.1822,
+      "Chewing, mastication": 0.0791,
+      "Inside, small room": 0.0495,
+      "Tearing": 0.0339,
+      "Sound effect": 0.0229,
+      "Speech": 0.021,
+      "Scrape": 0.0189,
+      "Crackle": 0.009,
+      "Crumpling, crinkling": 0.0075
+    }
+  },
+  {
+    "start": 5022,
+    "end": 5028,
+    "top": {
+      "Biting": 0.3926,
+      "Crunch": 0.3506,
+      "Speech": 0.2054,
+      "Chewing, mastication": 0.1113,
+      "Inside, small room": 0.0572,
+      "Whispering": 0.0475,
+      "Scrape": 0.0209,
+      "Sound effect": 0.0167,
+      "Tearing": 0.0148,
+      "Crackle": 0.0059
+    }
+  },
+  {
+    "start": 5024,
+    "end": 5030,
+    "top": {
+      "Biting": 0.2275,
+      "Crunch": 0.136,
+      "Speech": 0.091,
+      "Wheeze": 0.0673,
+      "Chewing, mastication": 0.0667,
+      "Snort": 0.0611,
+      "Inside, small room": 0.045,
+      "Animal": 0.0161,
+      "Gasp": 0.0134,
+      "Domestic animals, pets": 0.0102
+    }
+  },
+  {
+    "start": 5026,
+    "end": 5032,
+    "top": {
+      "Biting": 0.3848,
+      "Speech": 0.2842,
+      "Crunch": 0.2107,
+      "Chewing, mastication": 0.1116,
+      "Whispering": 0.0888,
+      "Inside, small room": 0.038,
+      "Snort": 0.017,
+      "Stomach rumble": 0.0152,
+      "Tearing": 0.0133,
+      "Scrape": 0.0133
+    }
+  },
+  {
+    "start": 5028,
+    "end": 5034,
+    "top": {
+      "Crunch": 0.3589,
+      "Biting": 0.2603,
+      "Chewing, mastication": 0.1047,
+      "Speech": 0.0956,
+      "Sound effect": 0.0387,
+      "Whispering": 0.0296,
+      "Snort": 0.0268,
+      "Inside, small room": 0.0227,
+      "Gasp": 0.0219,
+      "Sneeze": 0.0135
+    }
+  },
+  {
+    "start": 5030,
+    "end": 5036,
+    "top": {
+      "Crunch": 0.4042,
+      "Biting": 0.3004,
+      "Speech": 0.126,
+      "Whispering": 0.1175,
+      "Chewing, mastication": 0.1032,
+      "Sound effect": 0.0648,
+      "Scrape": 0.0351,
+      "Inside, small room": 0.0147,
+      "Gasp": 0.0142,
+      "Music": 0.0135
+    }
+  },
+  {
+    "start": 5032,
+    "end": 5038,
+    "top": {
+      "Crunch": 0.3668,
+      "Biting": 0.1439,
+      "Chewing, mastication": 0.0978,
+      "Sound effect": 0.0977,
+      "Scrape": 0.0515,
+      "Speech": 0.0373,
+      "Gasp": 0.0286,
+      "Whispering": 0.0156,
+      "Music": 0.0148,
+      "Squish": 0.0145
+    }
+  },
+  {
+    "start": 5034,
+    "end": 5040,
+    "top": {
+      "Crunch": 0.3584,
+      "Biting": 0.1205,
+      "Chewing, mastication": 0.1074,
+      "Sound effect": 0.0522,
+      "Scrape": 0.0482,
+      "Speech": 0.0402,
+      "Gasp": 0.0348,
+      "Crack": 0.0161,
+      "Crackle": 0.015,
+      "Squish": 0.0138
+    }
+  },
+  {
+    "start": 5036,
+    "end": 5040,
+    "top": {
+      "Crunch": 0.358,
+      "Biting": 0.1107,
+      "Chewing, mastication": 0.0503,
+      "Sound effect": 0.0411,
+      "Scrape": 0.0391,
+      "Speech": 0.0329,
+      "Inside, small room": 0.0267,
+      "Tearing": 0.0263,
+      "Crack": 0.0241,
+      "Crumpling, crinkling": 0.0222
+    }
+  }
+]
