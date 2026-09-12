@@ -122,7 +122,7 @@ def encoder_options(source, report, selected='source'):
     lossy=target not in ('flac','alac') and not target.startswith('pcm_')
     if lossy:
         if selected=='aac' and (name in ('flac','alac') or name.startswith('pcm_')):
-            bitrate=128000*report['channels'];bitrate_basis='default_for_lossless_source'
+            bitrate=320000;bitrate_basis='default_for_lossless_source'
         bitrate=max(8000,bitrate)
         if target=='aac':bitrate=min(bitrate,rate*6*report['channels'])
         args+=['-b:a',str(bitrate)]
