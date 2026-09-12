@@ -9,7 +9,9 @@ class NeuralClient:
     def __init__(self,kind,cfg):
         python=ROOT/'runtime/neural/python.exe'
         if not python.is_file():raise RuntimeError('请在运行环境中安装 Qwen / ASMR 识别依赖。')
-        scratch=ROOT/'runtime/neural-jobs';scratch.mkdir(parents=True,exist_ok=True)
+        # Keep crash/cancellation leftovers inside the owning task's bounded cache.
+        scratch=Path(cfg['_task_cache']) if cfg.get('_task_cache') else ROOT/'runtime/neural-jobs'
+        scratch.mkdir(parents=True,exist_ok=True)
         self.temp=tempfile.TemporaryDirectory(prefix='inference-',dir=scratch)
         env=os.environ.copy();env.update(HF_HUB_OFFLINE='1',TRANSFORMERS_OFFLINE='1',HF_HUB_DISABLE_TELEMETRY='1',PYTHONIOENCODING='utf-8')
         self.process=subprocess.Popen([str(python),'-X','utf8',str(ROOT/'engine/neural_worker.py')],

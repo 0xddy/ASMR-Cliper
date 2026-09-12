@@ -13,6 +13,7 @@ import numpy as np
 from .common import ROOT, event, fingerprint, read_json, save_json, settings
 from .model_catalog import model_signature
 from .progress import advance, phase, tracked
+from .task_cache import cache_lock, begin as begin_cache, finish as finish_cache, maintain
 
 RATE = 16000
 BLOCK = 300 * RATE
@@ -235,7 +236,14 @@ def write_menu(folder,menu):
 def generate(path,report,cfg):
     started=time.monotonic();path=Path(path);identity=fingerprint(path)
     if not available():return {'status':'unavailable','chapters':[],'note':'请在运行环境安装 ASMR 声音识别 · CLAP 及其依赖后补生成节目单。'}
-    cache=Path(cfg['cache_dir'])/'program-menus'/identity;cache.mkdir(parents=True,exist_ok=True)
+    cache=Path(cfg['cache_dir'])/'program-menus'/identity
+    maintain(cfg,exclude=(cache,))
+    with cache_lock(cache):
+        begin_cache(cache,path)
+        return generate_locked(path,report,{**cfg,'_task_cache':str(cache)},cache,identity,started)
+
+
+def generate_locked(path,report,cfg,cache,identity,started):
     matcher=MenuMatcher(cfg,cache)
     duration=float(report['duration']);rows=[]
     total_samples=round(duration*RATE)
@@ -253,8 +261,8 @@ def generate(path,report,cfg):
           'source_fingerprint':identity,'duration':duration,'windows_checked':len(rows),
           'created_at':datetime.now().isoformat(timespec='seconds'),'elapsed_seconds':round(time.monotonic()-started,3),
           'chapters':chapters(rows,report.get('speech_review',{}).get('findings',[]))}
-    save_json(cache/'evidence.json',{'model':matcher.identity,'windows':rows})
     write_menu(path.parent,menu)
+    menu['cache_cleanup']=finish_cache(cfg,cache,path)
     return menu
 
 

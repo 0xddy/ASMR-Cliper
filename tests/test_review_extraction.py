@@ -191,6 +191,10 @@ class ReviewExtractionTests(unittest.TestCase):
                     rounds=[e['task_progress']['round'] for e in events if e.get('task_progress',{}).get('stage')==5]
                     self.assertEqual(max(rounds),1 if empty else 2)
                     self.assertEqual(reviewer.inspect.call_count,2)
+                    self.assertEqual(report['cache_cleanup']['status'],'cleaned')
+                    self.assertFalse(list((folder/'cache').rglob('analysis.wav')))
+                    self.assertFalse(list((folder/'cache').rglob('frames.npz')))
+                    self.assertTrue((Path(report['output']).parent/'剪辑计划.json').is_file())
             # Constructor mocks retain mmap arguments in cyclic call records.
             # Release those before Windows removes the temporary cache files.
             import gc

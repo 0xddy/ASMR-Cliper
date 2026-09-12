@@ -154,6 +154,8 @@ class MediaExportTests(unittest.TestCase):
             self.assertTrue(Path(path).is_file())
             self.assertTrue(report['decode_verified'])
             self.assertEqual(reviewer.calls,2)
+            self.assertEqual(report['cache_cleanup']['status'],'cleaned')
+            self.assertFalse(list(Path(cfg['cache_dir']).rglob('analysis.wav')))
             report['program_menu']={'status':'ready','chapters':[]}
             return report['program_menu']
         def make_plan(meta,frames,speech,*args):

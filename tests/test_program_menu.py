@@ -97,7 +97,7 @@ class MenuAudioTests(unittest.TestCase):
                 self.assertTrue(all(len(p)<=32000 for _,p in parts))
                 self.assertEqual([a for a,_ in parts],list(range(0,len(actual),32000)))
 
-    def test_inference_reads_finished_pcm_exports_sidecars_and_reuses_identical_windows(self):
+    def test_inference_reads_finished_pcm_exports_sidecars_and_cleans_completed_cache(self):
         with tempfile.TemporaryDirectory() as folder:
             folder=Path(folder);path=folder/'finished.wav'
             pcm=(np.sin(np.arange(20*16000)*.07)*3000).astype(np.int16)
@@ -119,7 +119,7 @@ class MenuAudioTests(unittest.TestCase):
             with patch.object(menu,'available',return_value=True),patch.object(menu,'model_signature',return_value=['model']), \
                  patch('asmrclip.neural_client.NeuralClient',return_value=client) as factory:
                 first=menu.generate(path,report,cfg);second=menu.generate(path,report,cfg)
-            self.assertEqual(factory.call_count,1)
+            self.assertEqual(factory.call_count,2)
             self.assertEqual(first['chapters'],second['chapters'])
             self.assertEqual(first['chapters'][0]['title'],'心跳')
             self.assertEqual(first['chapters'][0]['start'],0.)
@@ -127,6 +127,9 @@ class MenuAudioTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),original)
             for name in ('节目单.txt','节目单.csv','节目单.json'):self.assertTrue((folder/name).is_file())
             self.assertEqual(read_json(folder/'节目单.json')['timeline'],'final_output')
+            self.assertEqual(first['cache_cleanup']['status'],'cleaned')
+            self.assertEqual(list((folder/'cache').rglob('menu-windows.json')),[])
+            self.assertEqual(list((folder/'cache').rglob('evidence.json')),[])
 
     def test_annotation_command_rejects_unrelated_report(self):
         with tempfile.TemporaryDirectory() as folder:

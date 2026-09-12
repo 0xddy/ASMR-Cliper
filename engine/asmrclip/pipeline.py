@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .common import configure_dlls, event, fingerprint, read_json, save_json, settings
 from .progress import tracked, phase, scope
+from .task_cache import cache_lock, begin as begin_cache, finish as finish_cache, maintain
 
 
 def doctor(cfg):
@@ -27,26 +28,6 @@ def doctor(cfg):
         raise ValueError('缺少：'+', '.join(missing)+'。请运行 scripts/setup-runtime.ps1。')
     event('doctor','环境文件与依赖检查通过',100,checks=checks,cuda_devices=ctranslate2.get_cuda_device_count(),
           onnx_providers=ort.get_available_providers(),python=os.sys.executable)
-
-
-@contextlib.contextmanager
-def cache_lock(cache):
-    import msvcrt
-    cache.mkdir(parents=True,exist_ok=True)
-    with (cache/'.lock').open('a+b') as f:
-        if f.tell()==0:
-            f.write(b'0')
-            f.flush()
-        f.seek(0)
-        try:
-            msvcrt.locking(f.fileno(),msvcrt.LK_NBLCK,1)
-        except OSError:
-            raise RuntimeError('同一音频已有另一个任务正在处理。') from None
-        try:
-            yield
-        finally:
-            f.seek(0)
-            msvcrt.locking(f.fileno(),msvcrt.LK_UNLCK,1)
 
 
 @tracked
@@ -77,16 +58,22 @@ def run(data):
     inspect_audio(source)
     identity=fingerprint(source)
     cache=Path(cfg['cache_dir'])/identity
-    with cache_lock(cache):
+    maintain(cfg,exclude=(cache,))
+    cfg={**cfg,'_task_cache':str(cache)}
+    with cache_lock(cache), contextlib.ExitStack() as resources:
+        begin_cache(cache,source)
         save_json(cache/'source.json',{'path':str(source),'fingerprint':identity})
         meta,frames=analyze_input_audio(source,cache,cfg,media)
         phase(2, '准备语音模型与语言检测')
         recognizer=Recognizer(cfg)
+        resources.callback(recognizer.close)
         try:speech=recognizer.scan(cache/'analysis.wav',cfg,cache)
         finally:recognizer.close()
         _,pcm=wavfile.read(cache/'analysis.wav',mmap=True)
+        if getattr(pcm,'_mmap',None) is not None:resources.callback(pcm._mmap.close)
         phase(3, '准备声音分类模型')
         classifier=Classifier(cfg,pcm,cache)
+        resources.callback(classifier.close)
         with scope('背景音乐检查',0,.25):
             music=classifier.music_intervals(meta['analysis_duration'])
         with scope('人声、休息与突兀声音检查',.25,.5):
@@ -109,6 +96,7 @@ def run(data):
         plan=make_plan(meta,frames,speech,music,cfg,classifier,exclusions)
         if cfg['audit'] and plan['keep_frames']:
             recognizer=Recognizer(cfg)
+            resources.callback(recognizer.close)
             try:found=recognizer.audit(pcm,plan['keep_frames'],plan['frame_seconds'])
             finally:recognizer.close()
             save_json(cache/'audit-latest.json',{'new_candidates':found})
@@ -127,6 +115,7 @@ def run(data):
         classifier.close()
         gc.collect()
         reviewer=Reviewer(cfg,speech['language'],cache/'review-results') if cfg['review_enabled'] or cfg['mode']=='extract' else None
+        if reviewer:resources.callback(reviewer.close)
         passes=[]
         for attempt in range(cfg['review_max_passes'] if reviewer else 1):
             if reviewer:
@@ -165,9 +154,15 @@ def run(data):
                 plan=next_plan
                 plan['language']=speech['language']
                 save_json(cache/f'plan-{cfg["mode"]}.json',plan)
-        save_json(cache/f'plan-{cfg["mode"]}.json',plan)
         if reviewer:reviewer.close()
-        save_json(cache/'post-review-latest.json',report['speech_review'])
+        # Final media, edit plan and review findings are already in the output
+        # folder. Release the Windows mmap/worker handles before removing scratch.
+        try:resources.close()
+        except Exception as exc:event('log','成片已保存，部分分析资源未能释放：'+str(exc))
+        gc.collect()
+        report['cache_cleanup']=finish_cache(cfg,cache,report['output'])
+        try:save_json(Path(report['output']).parent/'校验报告.json',report)
+        except OSError as exc:event('log','成片已保存，缓存清理状态未能写入报告：'+str(exc))
         if cfg['generate_program_menu']:
             from .program_menu import attach
             # The validated media is already published. Persist it in history
