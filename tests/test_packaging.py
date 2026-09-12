@@ -161,9 +161,13 @@ class PackagingTests(unittest.TestCase):
         self.put('config/user.json', b'PRIVATE')
         self.put('runtime/environment-status.json', b'ABSOLUTE PATH')
         bundle.save(self.root / 'build-info.json', {'version':'0.6.0','verification':{'passed':True}})
-        with patch.dict(os.environ, {'GITHUB_OUTPUT':'', 'GITHUB_STEP_SUMMARY':''}):
+        github_output = self.folder / 'github-output.txt'
+        with patch.dict(os.environ, {'GITHUB_OUTPUT':str(github_output), 'GITHUB_STEP_SUMMARY':''}):
             bundle.archive(self.root, self.folder / 'out')
         archive = self.folder / 'out/ASMR-Cliper-0.6.0-win64-nv.zip'
+        outputs = dict(line.split('=', 1) for line in github_output.read_text(encoding='utf8').splitlines())
+        self.assertEqual(outputs['archive_name'], archive.name)
+        self.assertEqual(Path(outputs['archive']), archive)
         with zipfile.ZipFile(archive) as z:
             self.assertIsNone(z.testzip())
             self.assertEqual(z.read('ASMR-Cliper/asmrcliper.exe'), bytes(range(256)) * 20)

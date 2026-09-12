@@ -4,7 +4,7 @@ Windows 10/11 x64 本地 ASMR 自动剪辑工具。支持音频和视频，识�
 
 ## 使用
 
-完整集成包的构建与下载方式见 [win64-nv 打包说明](docs/BUILD_WIN64_NV.md)。解压后运行 `ASMR-Cliper\asmrcliper.exe`。
+完整集成包在构建成功后自动发布到 [Releases](https://github.com/0xddy/ASMR-Cliper/releases)。下载全部分卷后，按 [合并与解压说明](docs/BUILD_WIN64_NV.md) 生成完整 ZIP，解压后运行 `ASMR-Cliper\asmrcliper.exe`。
 
 1. 打开「运行环境」检查组件；如有缺失，点击「补齐环境」。模型和下载代理可在界面设置。
 2. 在「剪辑任务」选择音频或视频、输出目录、输出类型和模式，默认使用 V3。

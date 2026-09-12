@@ -2,12 +2,22 @@
 
 将本项目源码提交到 GitHub 仓库，保留 `.github/workflows/build-win64-nv.yml`。工作流进入默认分支后，在 **Actions → Build win64-nv (full portable package) → Run workflow** 点击运行。默认使用 `windows-2022`，无需配置 Token、Python、CUDA Toolkit 或模型下载密钥。
 
-运行成功后，在该次任务的 Artifacts 中下载：
+运行成功后，会自动发布到仓库的 **Releases**。每次运行使用独立标签 `v版本号-win64-nv-运行ID`，绑定本次构建提交；同一运行重试会继续处理同一个 Release。
+
+GitHub 要求[每个 Release 附件小于 2 GiB](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)，完整包会拆成每卷最多 1900 MiB 的文件。下载全部 `.zip.001`、`.zip.002` 等分卷、同名 `.zip.parts.json` 和 `merge-win64-nv.ps1` 到同一目录，然后在该目录运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\merge-win64-nv.ps1
+```
+
+脚本检查每卷和合并后 ZIP 的大小、SHA-256，生成完整 ZIP。合并需额外预留一个 ZIP 的空间。完整解压后运行 `ASMR-Cliper\asmrcliper.exe`，无需安装其他解压或合并工具。
+
+该次任务的 Artifacts 中也保留：
 
 - `ASMR-Cliper-版本号-win64-nv.zip`：完整 ZIP64 集成包，直接解压后运行 `ASMR-Cliper\asmrcliper.exe`。
 - `win64-nv-final-reports-…`：ZIP 的 SHA-256 校验文件、编译与打包日志、CTest 报告和移动目录后的环境验证报告。
 
-产物默认保留 7 天。工作流仅手动运行，不会自动发布 GitHub Release。GitHub 的构建时长、制品存储和下载额度仍按仓库所属账号计算。
+Actions 产物默认保留 7 天；Release 附件不会随 Actions 产物到期而删除。工作流仍仅手动启动，发布任务使用仓库自带的 `GITHUB_TOKEN`，无需额外配置 Token。GitHub 的构建时长、制品存储和下载额度仍按仓库所属账号计算。
 
 ## 独立任务与失败重试
 
@@ -16,9 +26,12 @@
 1. **Download all environments and models**：安装并保存完整环境快照为中间制品。
 2. **Compile and test Win64 GUI**：仅编译 Release 程序并执行原生测试，不下载模型。
 3. **Assemble and validate portable package**：下载前两项已完成的制品，执行 Python 回归、目录迁移验证与最终打包。
-4. **Delete intermediate artifacts after success**：最终压缩包上传成功后，删除本次运行的环境快照、编译中间制品和相应中间日志。
+4. **Publish verified package to GitHub Release**：校验完整 ZIP 和构建提交，创建草稿并逐卷上传；全部附件的远端大小与 SHA-256 验证通过后公开发布。
+5. **Delete intermediate artifacts after success**：Release 发布成功后，删除本次运行的环境快照、编译中间制品和相应中间日志。
 
 如果编译或打包失败，在**该次运行**右上角选择 **Re-run failed jobs**，已成功的下载任务不会重新运行，打包会复用其环境快照。不要点新的 Run workflow 或 Re-run all jobs，这两种操作会重新执行下载。重试应在中间制品的 7 天有效期内完成。若下载任务本身失败，需要重跑下载任务；中断的任务没有完整可复用制品。
+
+如果仅发布失败，同样选择 **Re-run failed jobs**：已成功的下载、编译和打包不会重跑。发布任务会重新获取最终 ZIP，复用草稿中已经校验通过的附件，仅补传缺失或损坏的附件。已公开发布的 Release 不会被覆盖。若需要使用新提交中的代码修复，必须从该提交启动新的 Run workflow；重跑旧任务仍然使用旧提交。
 
 失败时保留已上传的中间制品，成功后立即清理。每个任务结束还会清理其专用工作目录，清理前校验目录所有权；不删除仓库、预装工具链或其他任务目录。未创建 Actions cache。最终 ZIP 与验证报告保留 7 天后过期；GitHub 已消耗的运行分钟数不能退回，存储用量统计也可能延迟更新。
 
@@ -41,6 +54,8 @@ FFmpeg 使用项目环境清单中的发布链接，会随上游发布更新；p
 ## 空间与运行器
 
 当前六组模型本身约 11.38 GiB，另有 CUDA、PyTorch、Python 和压缩输出。构建开始要求工作盘至少 **50 GiB 可用空间**，打包前还会根据实际文件总量检查输出盘。pip 禁用下载缓存，临时文件与构建文件放在同一工作盘。
+
+独立发布任务要求至少 **25 GiB 可用空间**，只下载最终 ZIP 和报告；分卷逐个生成、上传后移除，不再复制整套模型或同时保存全部分卷。
 
 GitHub 托管构建机会选择可用空间最多的本地磁盘，不删除预装工具。标准托管运行器的保证空间不足以覆盖本包的峰值，实际可用空间随镜像变化；如预检提示空间不足，在 Run workflow 的 `runner` 输入填写已配置的、带 VS 2022 C++ 工具链的较大 Windows x64 运行器标签。自托管机器使用 `RUNNER_TEMP` 所在磁盘，不自动写入其他磁盘。
 

@@ -312,6 +312,7 @@ def archive(root, output):
     if os.environ.get('GITHUB_OUTPUT'):
         with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf8') as handle:
             handle.write(f'archive={target}\n')
+            handle.write(f'archive_name={target.name}\n')
     if os.environ.get('GITHUB_STEP_SUMMARY'):
         with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf8') as handle:
             handle.write(f'### ASMR-Cliper win64-nv\n\n- Package: `{target.name}` ({target.stat().st_size / 1024**3:.2f} GiB)\n'
