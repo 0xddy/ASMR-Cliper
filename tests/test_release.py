@@ -154,6 +154,52 @@ class ReleaseTests(unittest.TestCase):
             self.publish()
         self.assertFalse(self.github.uploads)
 
+    def app_archive(self, extra=None):
+        self.archive = self.folder / 'ASMR-Cliper-0.6.13-win64-app.zip'
+        self.checksum = self.archive.with_suffix('.zip.sha256')
+        self.build_info.update(target='win64-app', includes_python=False, includes_models=False)
+        self.write_archive()
+        with zipfile.ZipFile(self.archive, 'a') as package:
+            for name in ('engine/main.py', 'runtime/tools/ffmpeg.exe', 'runtime/tools/ffprobe.exe'):
+                package.writestr('ASMR-Cliper/' + name, b'application file')
+            if extra:
+                package.writestr('ASMR-Cliper/' + extra, b'unwanted runtime')
+        self.checksum.write_text(f'{release.sha256(self.archive)}  {self.archive.name}\n', encoding='ascii')
+
+    def publish_app(self):
+        return release.publish(self.archive, self.checksum, REPOSITORY, COMMIT, '123456', target='win64-app')
+
+    def test_app_release_uploads_direct_zip_and_checksum_without_parts(self):
+        self.app_archive()
+        url = self.publish_app()
+        self.assertTrue(url.endswith('/v0.6.13-win64-app-123456'))
+        self.assertEqual(set(self.github.contents), {self.archive.name, self.archive.name + '.sha256'})
+        self.assertEqual(self.github.contents[self.archive.name], self.archive.read_bytes())
+        self.assertEqual(self.github.publishes, 1)
+        uploads = list(self.github.uploads)
+        self.publish_app()
+        self.assertEqual(self.github.uploads, uploads)
+        self.assertEqual(self.github.publishes, 1)
+
+    def test_app_release_failed_checksum_upload_can_resume_verified_zip(self):
+        self.app_archive()
+        self.github.fail_asset = self.archive.name + '.sha256'
+        with self.assertRaisesRegex(RuntimeError, 'connection failure'):
+            self.publish_app()
+        self.assertTrue(self.github.release['draft'])
+        self.assertEqual(self.github.publishes, 0)
+        self.github.fail_asset = None
+        self.publish_app()
+        self.assertEqual(self.github.uploads.count(self.archive.name), 1)
+        self.assertEqual(self.github.publishes, 1)
+
+    def test_app_release_rejects_bundled_models_and_environments(self):
+        for name in ('runtime/python/python.exe', 'models/whisper/model.bin', 'runtime/downloads/source.zip'):
+            self.app_archive(extra=name)
+            with self.assertRaisesRegex(ValueError, 'exclude Python/model'):
+                self.publish_app()
+        self.assertEqual(self.github.creates, 0)
+
     def test_release_part_size_must_be_below_github_limit(self):
         for size in (0, release.ASSET_LIMIT):
             with self.subTest(size=size), self.assertRaises(ValueError):
