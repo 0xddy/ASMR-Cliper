@@ -15,7 +15,7 @@ void MainWindow::testProgramMenu() {
     selectPage(3,1);
     check("menu and review share recognition settings",visible(MenuEnabled)&&visible(Audit)&&visible(SpeechChoice)&&!visible(KeepSoftLaugh)&&!visible(ProxyUrl));
     const auto language=cfg_["language"];text(Silence,L"unfinished value");
-    SendMessageW(control(MenuEnabled),BM_SETCHECK,BST_UNCHECKED,0);SendMessageW(control(Save),BM_CLICK,0,0);
+    SendMessageW(control(MenuEnabled),BM_SETCHECK,BST_CHECKED,0);SendMessageW(control(MenuEnabled),BM_CLICK,0,0);
     check("menu settings save without reading other unfinished fields",cfg_["generate_program_menu"]==false&&cfg_["language"]==language);
     SendMessageW(control(Reset),BM_CLICK,0,0);
     check("menu default resets independently",cfg_["generate_program_menu"]==true&&value(Silence)==L"unfinished value");
@@ -162,6 +162,7 @@ void MainWindow::testControls() {
     nlohmann::json checks=nlohmann::json::array();
     auto check=[&](const char* name,bool passed) {checks.push_back({{"name",name},{"passed",passed}});};
     auto click=[&](int id) {SendMessageW(control(id),BM_CLICK,0,0);};
+    auto choose=[&](int id,int index) {SendMessageW(control(id),CB_SETCURSEL,index,0);SendMessageW(window_,WM_COMMAND,MAKEWPARAM(id,CBN_SELCHANGE),reinterpret_cast<LPARAM>(control(id)));};
     auto visible=[&](int id) {return (GetWindowLongPtrW(control(id),GWL_STYLE)&WS_VISIBLE)!=0;};
     auto checked=[&](int id) {return SendMessageW(control(id),BM_GETCHECK,0,0)==BST_CHECKED;};
     const auto folder=std::filesystem::path(Wide(options_["test-controls"])).parent_path();
@@ -186,10 +187,10 @@ void MainWindow::testControls() {
     check("pause and fade defaults preserved",value(Silence)==L"1.5"&&!checked(FadeEnabled)&&value(FadeSeconds)==L"0.3"&&!IsWindowEnabled(control(FadeSeconds)));
     check("output edges default on at half a second",checked(EdgeFadeEnabled)&&value(EdgeFadeSeconds)==L"0.5"&&IsWindowEnabled(control(EdgeFadeSeconds)));
     click(EdgeFadeEnabled);check("edge duration follows its switch",!IsWindowEnabled(control(EdgeFadeSeconds)));click(EdgeFadeEnabled);
-    text(EdgeFadeSeconds,L"0.8");click(Save);populateSettings(0);
+    text(EdgeFadeSeconds,L"0.8");flushPendingSettings();populateSettings(0);
     check("edge duration saves and round trips independently of joins",cfg_["edge_fade_enabled"]==true&&cfg_["edge_fade_seconds"]==.8&&!cfg_["join_fade_enabled"].get<bool>()&&value(EdgeFadeSeconds)==L"0.8");
-    const auto beforeEdge=cfg_;text(EdgeFadeSeconds,L"4");click(Save);check("invalid edge duration cannot change configuration",cfg_==beforeEdge);
-    text(EdgeFadeSeconds,L"0.5");click(Save);
+    const auto beforeEdge=cfg_;text(EdgeFadeSeconds,L"4");flushPendingSettings();check("invalid edge duration cannot change configuration",cfg_==beforeEdge);
+    text(EdgeFadeSeconds,L"0.5");flushPendingSettings();
     SetWindowPos(window_,nullptr,0,0,d(1100),d(800),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
     screenshot(folder/L"preferences-editing.png");
     click(StrictDetails);
@@ -200,7 +201,7 @@ void MainWindow::testControls() {
         SendMessageW(control(id),WM_LBUTTONUP,0,0);
         check(("input padding focuses without changing value "+std::to_string(id)).c_str(),GetFocus()==control(id)&&value(id)==before);
     }
-    RECT action{},client{};GetWindowRect(control(Save),&action);MapWindowPoints(nullptr,window_,reinterpret_cast<POINT*>(&action),2);GetClientRect(window_,&client);
+    RECT action{},client{};GetWindowRect(control(Reset),&action);MapWindowPoints(nullptr,window_,reinterpret_cast<POINT*>(&action),2);GetClientRect(window_,&client);
     check("header actions and expanded strict fields fit minimum window",visible(Before)&&action.bottom<d(94)&&inputFrames_.at(Before).bottom+d(20)<client.bottom-d(80));
     screenshot(folder/L"preferences-editing-expanded.png");
     SetWindowPos(window_,nullptr,0,0,d(1560),d(960),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
@@ -211,38 +212,38 @@ void MainWindow::testControls() {
     check("folding and category changes keep strict drafts",visible(Before)&&value(Before)==L"6.5");
     text(Silence,L"1.2");click(FadeEnabled);text(FadeSeconds,L"0.45");
     for(auto [id,key]:SoundOptions)click(id);
-    click(Save);populateSettings(0);
+    flushPendingSettings();populateSettings(0);
     check("editing saves pause fade and strict parameters together",cfg_["max_pause_seconds"]==1.2&&cfg_["strict_pre"]==6.5&&cfg_["join_fade_enabled"]==true&&cfg_["join_fade_seconds"]==.45&&value(Silence)==L"1.2"&&value(FadeSeconds)==L"0.45"&&!cfg_.contains("silence_seconds"));
     check("retention settings round trip",!checked(KeepSoftLaugh)&&!checked(KeepHeartbeat)&&!checked(KeepTapping)&&checked(KeepLoudLaugh)&&checked(KeepVaping)&&checked(KeepDrinking)&&checked(KeepImpacts));
-    const auto beforeInvalid=cfg_;text(Silence,L"1.1");click(KeepTapping);text(FadeSeconds,L"nan");click(Save);
-    check("invalid fade rolls back all editing changes",cfg_==beforeInvalid);
+    const auto previousFade=cfg_["join_fade_seconds"];text(Silence,L"1.1");click(KeepTapping);text(FadeSeconds,L"nan");flushPendingSettings();
+    check("invalid fade keeps last valid value without blocking other settings",cfg_["join_fade_seconds"]==previousFade&&cfg_["max_pause_seconds"]==1.1&&cfg_["keep_tapping"]==true);
+    const auto beforeInvalid=cfg_;
     text(FadeSeconds,L"0.45");text(Silence,L"0.1");bool rejectedPause=false;try{readSettings();}catch(...){rejectedPause=true;}
     check("invalid maximum pause rejects task settings atomically",rejectedPause&&cfg_==beforeInvalid);
     text(Silence,L"unfinished pause");text(FadeSeconds,L"0.6");text(EdgeFadeSeconds,L"0.9");
-    click(SettingsRecognition);SendMessageW(control(SpeechChoice),CB_SETCURSEL,1,0);SendMessageW(control(ReviewChoice),CB_SETCURSEL,0,0);
-    SendMessageW(control(Language),CB_SETCURSEL,2,0);SendMessageW(control(Device),CB_SETCURSEL,2,0);click(MenuEnabled);click(Audit);click(Save);
-    check("recognition saves without parsing unfinished editing fields",cfg_["speech_model"]=="qwen3-asr"&&cfg_["review_model_id"]=="whisper-large-v3"&&cfg_["language"]=="ja"&&cfg_["device"]=="cpu"&&cfg_["generate_program_menu"]==false&&cfg_["review_enabled"]==false&&cfg_["max_pause_seconds"]==1.2);
-    check("review model follows review switch",!IsWindowEnabled(control(ReviewChoice)));click(Audit);click(Save);
+    click(SettingsRecognition);choose(SpeechChoice,1);choose(ReviewChoice,0);
+    choose(Language,2);choose(Device,2);click(MenuEnabled);click(Audit);
+    check("recognition saves without parsing unfinished editing fields",cfg_["speech_model"]=="qwen3-asr"&&cfg_["review_model_id"]=="whisper-large-v3"&&cfg_["language"]=="ja"&&cfg_["device"]=="cpu"&&cfg_["generate_program_menu"]==false&&cfg_["review_enabled"]==false&&cfg_["max_pause_seconds"]==1.1);
+    check("review model follows review switch",!IsWindowEnabled(control(ReviewChoice)));click(Audit);
     check("enabling review restores model selection",IsWindowEnabled(control(ReviewChoice)));
     populateSettings(1);check("recognition selections round trip",value(Language)==L"日语"&&value(Device)==L"CPU"&&SendMessageW(control(SpeechChoice),CB_GETCURSEL,0,0)==1&&checked(Audit));
     SendMessageW(control(OutputKind),CB_SETCURSEL,2,0);click(Reset);
     check("recognition reset preserves editing and output drafts",value(Silence)==L"unfinished pause"&&value(FadeSeconds)==L"0.6"&&value(EdgeFadeSeconds)==L"0.9"&&checked(FadeEnabled)&&SendMessageW(control(OutputKind),CB_GETCURSEL,0,0)==2);
-    SendMessageW(control(AudioEncoding),CB_SETCURSEL,1,0);click(Save);populateSettings(1);
+    choose(AudioEncoding,1);populateSettings(1);
     check("output encoding is saved in recognition category",cfg_["audio_output_codec"]=="flac"&&SendMessageW(control(AudioEncoding),CB_GETCURSEL,0,0)==1);
     screenshot(folder/L"preferences-recognition.png");
-    SendMessageW(control(AudioEncoding),CB_SETCURSEL,2,0);
-    SendMessageW(control(SpeechChoice),CB_SETCURSEL,1,0);SendMessageW(control(Language),CB_SETCURSEL,2,0);click(MenuEnabled);
+    choose(AudioEncoding,2);choose(SpeechChoice,1);choose(Language,2);click(MenuEnabled);
     click(SettingsAudio);click(Reset);
     check("editing reset preserves recognition drafts",SendMessageW(control(AudioEncoding),CB_GETCURSEL,0,0)==2&&SendMessageW(control(SpeechChoice),CB_GETCURSEL,0,0)==1&&value(Language)==L"日语"&&!checked(MenuEnabled)&&value(Silence)==L"1.5"&&!checked(FadeEnabled)&&checked(EdgeFadeEnabled)&&value(EdgeFadeSeconds)==L"0.5");
     click(SettingsNetwork);text(ProxyUrl,L"http://127.0.0.1:10886");
     if(checked(ProxyEnabled))click(ProxyEnabled);
-    click(Save);check("proxy off disables address",!IsWindowEnabled(control(ProxyUrl))&&cfg_["proxy_enabled"]==false);
-    click(ProxyEnabled);click(Save);
-    check("proxy on saves independently of recognition draft",IsWindowEnabled(control(ProxyUrl))&&cfg_["proxy_enabled"]==true&&cfg_["proxy_url"]=="http://127.0.0.1:10886"&&cfg_["speech_model"]=="whisper-large-v3"&&SendMessageW(control(SpeechChoice),CB_GETCURSEL,0,0)==1);
+    flushPendingSettings();check("proxy off disables address",!IsWindowEnabled(control(ProxyUrl))&&cfg_["proxy_enabled"]==false);
+    click(ProxyEnabled);
+    check("proxy saves without overwriting recognition settings",IsWindowEnabled(control(ProxyUrl))&&cfg_["proxy_enabled"]==true&&cfg_["proxy_url"]=="http://127.0.0.1:10886"&&cfg_["speech_model"]=="qwen3-asr"&&SendMessageW(control(SpeechChoice),CB_GETCURSEL,0,0)==1);
     screenshot(folder/L"preferences-network.png");
     click(Reset);check("network reset preserves other drafts",value(Language)==L"日语"&&!checked(MenuEnabled));
     enableControls(true);
-    check("busy state exposes cancel and locks all settings",visible(Progress)&&visible(Cancel)&&!IsWindowEnabled(control(OutputKind))&&!IsWindowEnabled(control(AudioEncoding))&&!IsWindowEnabled(control(SpeechChoice))&&!IsWindowEnabled(control(ReviewChoice))&&!IsWindowEnabled(control(ProxyEnabled))&&!IsWindowEnabled(control(ProxyUrl))&&!IsWindowEnabled(control(Start))&&!IsWindowEnabled(control(KeepTapping))&&!IsWindowEnabled(control(FadeEnabled))&&!IsWindowEnabled(control(FadeSeconds))&&!IsWindowEnabled(control(EdgeFadeEnabled))&&!IsWindowEnabled(control(EdgeFadeSeconds))&&!IsWindowEnabled(control(MenuEnabled))&&!IsWindowEnabled(control(Save))&&!IsWindowEnabled(control(Reset)));
+    check("busy state exposes cancel and locks all settings",visible(Progress)&&visible(Cancel)&&!IsWindowEnabled(control(OutputKind))&&!IsWindowEnabled(control(AudioEncoding))&&!IsWindowEnabled(control(SpeechChoice))&&!IsWindowEnabled(control(ReviewChoice))&&!IsWindowEnabled(control(ProxyEnabled))&&!IsWindowEnabled(control(ProxyUrl))&&!IsWindowEnabled(control(Start))&&!IsWindowEnabled(control(KeepTapping))&&!IsWindowEnabled(control(FadeEnabled))&&!IsWindowEnabled(control(FadeSeconds))&&!IsWindowEnabled(control(EdgeFadeEnabled))&&!IsWindowEnabled(control(EdgeFadeSeconds))&&!IsWindowEnabled(control(MenuEnabled))&&!IsWindowEnabled(control(Reset)));
     click(SettingsRecognition);check("category navigation stays available while busy",settingsTab_==1&&visible(Audit)&&!IsWindowEnabled(control(Audit)));
     enableControls(false);check("idle state hides task progress",!visible(Progress)&&!visible(Cancel)&&IsWindowEnabled(control(Start)));
     readSettings();check("starting task reads drafts from all categories",cfg_["audio_output_codec"]=="pcm"&&cfg_["speech_model"]=="qwen3-asr"&&cfg_["language"]=="ja"&&cfg_["generate_program_menu"]==false&&cfg_["output_kind"]=="video"&&cfg_["max_pause_seconds"]==1.5);
@@ -256,6 +257,65 @@ void MainWindow::testControls() {
     bool passed=std::all_of(checks.begin(),checks.end(),[](const auto& row){return row.at("passed").template get<bool>();});
     WriteJson(std::filesystem::path(Wide(options_["test-controls"])),{{"passed",passed},{"checks",checks}});
     completed_=passed;finishTest(passed?0:1);
+}
+
+void MainWindow::testAutoSave() {
+    using json=nlohmann::json;
+    namespace fs=std::filesystem;
+    json checks=json::array();
+    auto check=[&](const char* name,bool passed){checks.push_back({{"name",name},{"passed",passed}});};
+    auto click=[&](int id){SendMessageW(control(id),BM_CLICK,0,0);};
+    auto choose=[&](int id,int index){SendMessageW(control(id),CB_SETCURSEL,index,0);SendMessageW(window_,WM_COMMAND,MAKEWPARAM(id,CBN_SELCHANGE),reinterpret_cast<LPARAM>(control(id)));};
+    auto blur=[&](int id){SendMessageW(window_,WM_COMMAND,MAKEWPARAM(id,EN_KILLFOCUS),reinterpret_cast<LPARAM>(control(id)));};
+    auto pump=[&](DWORD milliseconds) {
+        auto until=GetTickCount64()+milliseconds;
+        while(GetTickCount64()<until) {
+            MSG message{};while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessageW(&message);}
+            auto now=GetTickCount64();if(now<until)MsgWaitForMultipleObjects(0,nullptr,FALSE,static_cast<DWORD>(until-now),QS_ALLINPUT);
+        }
+    };
+    const auto report=fs::path(Wide(options_["test-autosave"]));auto file=report;file.replace_extension(L".settings.json");
+    auto saved=[&](){return ReadJson(file);};
+    cfg_=ReadJson(root_/L"config/defaults.json");cfg_["input"]="";cfg_["output_dir"]="output";
+    populateSettings();saveSettings();selectPage(3,0);
+    check("preferences have no save button",!control(ReservedSave)&&control(Reset));
+    click(FadeEnabled);check("switch saves immediately to disk",saved()["join_fade_enabled"]==true);
+    text(Silence,L"");pump(450);
+    check("unfinished number keeps saved value",saved()["max_pause_seconds"]==1.5);
+    click(KeepTapping);check("unfinished number does not block another setting",saved()["keep_tapping"]==false&&saved()["max_pause_seconds"]==1.5);
+    text(Silence,L"0.85");check("typing is debounced",saved()["max_pause_seconds"]==1.5);
+    pump(450);check("idle input saves without focus change",saved()["max_pause_seconds"]==.85);
+    text(Silence,L"11");blur(Silence);
+    check("out of range input stays unsaved and reports the field",saved()["max_pause_seconds"]==.85&&status_.find(L"最长空窗期")!=std::wstring::npos);
+    text(Silence,L"1.2");blur(Silence);check("valid correction saves on blur and clears error",saved()["max_pause_seconds"]==1.2&&saveErrorControl_==0);
+    text(Before,L"6.5");selectPage(3,1);
+    check("switching category flushes pending values",saved()["strict_pre"]==6.5);
+    choose(Language,2);choose(Device,2);choose(SpeechChoice,1);choose(ReviewChoice,0);choose(AudioEncoding,3);
+    check("dropdown changes save models language device and encoding",saved()["language"]=="ja"&&saved()["device"]=="cpu"&&saved()["speech_model"]=="qwen3-asr"&&saved()["whisper_model"]=="models/qwen-asr"&&saved()["review_model_id"]=="whisper-large-v3"&&saved()["audio_output_codec"]=="aac");
+    click(MenuEnabled);click(Audit);check("review and menu switches save immediately",saved()["generate_program_menu"]==false&&saved()["review_enabled"]==false);
+    selectPage(3,2);text(ProxyUrl,L"http://127.0.0.1:18080");blur(ProxyUrl);click(ProxyEnabled);
+    check("network changes save without changing recognition",saved()["proxy_url"]=="http://127.0.0.1:18080"&&saved()["proxy_enabled"]==false&&saved()["language"]=="ja");
+    click(Reset);check("reset saves only the current category",saved()["proxy_url"]==cfg_["proxy_url"]&&saved()["proxy_enabled"]==true&&saved()["language"]=="ja"&&saved()["strict_pre"]==6.5);
+    selectPage(3,0);text(Silence,L"2.5");click(Reset);pump(450);
+    check("reset discards a pending value in its category",saved()["max_pause_seconds"]==1.5&&value(Silence)==L"1.5"&&saved()["language"]=="ja");
+    const auto beforePopulate=saved();populateSettings();pump(450);
+    check("configuration population does not write incidental changes",saved()==beforePopulate&&pendingSettings_.empty());
+    // Block only this test's temporary output file to exercise a real write failure.
+    auto temporary=file;temporary+=L".tmp";fs::create_directory(temporary);
+    click(KeepSoftLaugh);
+    check("failed disk write keeps saved configuration and reports failure",saved()["keep_soft_laugh"]==true&&cfg_["keep_soft_laugh"]==true&&saveErrorControl_==KeepSoftLaugh);
+    fs::remove(temporary);flushPendingSettings();
+    check("failed write can be retried without repeating the change",saved()["keep_soft_laugh"]==false&&saveErrorControl_==0);
+    selectPage(0);click(Extract);choose(OutputKind,2);
+    check("mode and mandatory V4 review persist together",saved()["mode"]=="extract"&&saved()["review_enabled"]==true&&saved()["output_kind"]=="video");
+    auto expected=saved();enableControls(true);click(Reset);click(KeepTapping);choose(Language,4);
+    check("busy task cannot change saved preferences",saved()==expected);
+    enableControls(false);populateSettings();
+    MainWindow reloaded(root_,{{"test-config",Utf8(file.wstring())},{"test-autosave",options_["test-autosave"]}});
+    check("fresh application loads automatically saved preferences",reloaded.cfg_["mode"]=="extract"&&reloaded.cfg_["language"]=="ja"&&reloaded.cfg_["audio_output_codec"]=="aac"&&reloaded.cfg_["keep_soft_laugh"]==false);
+    notice_=false;status_.clear();selectPage(3,0);screenshot(report.parent_path()/L"preferences-autosave.png");
+    bool passed=std::all_of(checks.begin(),checks.end(),[](const auto& row){return row.at("passed").template get<bool>();});
+    WriteJson(report,{{"passed",passed},{"checks",checks}});completed_=passed;finishTest(passed?0:1);
 }
 
 void MainWindow::testSwitches() {

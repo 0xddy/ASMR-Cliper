@@ -2,13 +2,14 @@
 #include "ProcessRunner.h"
 #include <nlohmann/json.hpp>
 #include <map>
+#include <set>
 
 enum ControlId { Input=101, Output, BrowseInput, BrowseOutput, Strict, Relaxed, ModeText,
     Language, Device, Silence, Before, After, Minimum, DenseGap, Audit,
     Start, Cancel, Doctor, Play, Mapping, OpenOutput, Prompt, Progress, Log,
     NavTask, NavHistory, NavEnvironment, NavSettings, NavLogs,
     Install, RepairPython, RepairDependencies, RepairWhisper, RepairAst, RepairFfmpeg,
-    EditSettings, NetworkSettings, SettingsAudio, SettingsNetwork, Save, Reset,
+    EditSettings, NetworkSettings, SettingsAudio, SettingsNetwork, ReservedSave, Reset,
     ProxyEnabled, ProxyUrl, TestProxy, SilenceDb, History, OpenLogs, ClearLog, NewTask,
     SettingsSounds, KeepSoftLaugh, KeepLoudLaugh, KeepVaping, KeepDrinking, KeepImpacts, Extract, RepairReview, ReviewFindings,
     EnvironmentBase, EnvironmentModels, SpeechChoice, ReviewChoice, RepairQwen, RepairAligner, RepairClap, RepairNeural,
@@ -49,6 +50,8 @@ private:
     void readModelSettings();
     std::vector<std::string> requiredComponents() const;
     void saveSettings();
+    void autoSaveSetting(int id, bool reportInvalid = true);
+    void flushPendingSettings(bool reportInvalid = true);
     void start(bool doctor);
     void environmentTask(const std::string& action, const std::string& component = "all");
     void programMenuTask();
@@ -63,6 +66,7 @@ private:
     void testNavigationRendering();
     void testControls();
     void testSwitches();
+    void testAutoSave();
     void testProgress();
     void testProgramMenu();
     void testDropdowns();
@@ -116,6 +120,10 @@ private:
     bool timing_ = false, hasTiming_ = false;
     bool mediaReady_ = false;
     bool strictExpanded_ = false;
+    bool settingsReady_ = false, populatingSettings_ = false;
+    std::set<int> pendingSettings_;
+    int saveErrorControl_ = 0;
+    std::wstring saveError_;
     std::string activeOutput_;
     int dropdownTestId_ = 0;
     bool dropdownTestCancel_ = false, dropdownTestIdle_ = false;

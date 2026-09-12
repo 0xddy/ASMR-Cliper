@@ -19,6 +19,27 @@ namespace fs = std::filesystem;
 using Microsoft::WRL::ComPtr;
 namespace {
 using namespace UiTheme;
+constexpr UINT_PTR SettingsTimer=21;
+struct NumericSetting {int id;const char* key;double min,max;const wchar_t* label;};
+constexpr NumericSetting NumericSettings[]={
+    {Before,"strict_pre",0,60,L"说话前余量"},{After,"strict_post",0,60,L"说话后余量"},
+    {Minimum,"strict_min_section",1,600,L"最短片段"},{DenseGap,"strict_dense_gap",0,120,L"聊天合并间隔"},
+    {Silence,"max_pause_seconds",.3,10,L"最长空窗期"},{SilenceDb,"silence_db",-90,-20,L"静音电平"},
+    {FadeSeconds,"join_fade_seconds",.05,2,L"接缝淡化时长"},{EdgeFadeSeconds,"edge_fade_seconds",.05,3,L"首尾淡化时长"}};
+const NumericSetting* NumericParameter(int id) {
+    for(const auto& parameter:NumericSettings)if(parameter.id==id)return &parameter;
+    return nullptr;
+}
+double NumericValue(const std::wstring& input,const NumericSetting& parameter) {
+    try {
+        size_t used=0;double value=std::stod(input,&used);
+        if(used==input.size()&&std::isfinite(value)&&value>=parameter.min&&value<=parameter.max)return value;
+    }catch(const std::exception&){}
+    std::ostringstream range;range<<parameter.min<<" – "<<parameter.max;
+    throw std::runtime_error(Utf8(parameter.label)+"须为 "+range.str()+"，未保存此项。");
+}
+bool IsSettingsInput(int id) {return NumericParameter(id)||id==ProxyUrl||id==Input||id==Output;}
+bool IsSettingsChoice(int id) {return id==Language||id==Device||id==SpeechChoice||id==ReviewChoice||id==AudioEncoding||id==OutputKind;}
 std::wstring Duration(double sec) {
     auto s=static_cast<int>(std::round(sec));
     std::wostringstream out;
@@ -204,15 +225,12 @@ void MainWindow::readSoundSettings() {
     for(auto [id,key]:SoundOptions)cfg_[key]=SendMessageW(control(id),BM_GETCHECK,0,0)==BST_CHECKED;
 }
 void MainWindow::readFadeSettings() {
-    struct Fade {int toggle,field;const char* enabled;const char* seconds;double maximum;};
-    for(const auto& fade:std::vector<Fade>{{FadeEnabled,FadeSeconds,"join_fade_enabled","join_fade_seconds",2.},
-                                         {EdgeFadeEnabled,EdgeFadeSeconds,"edge_fade_enabled","edge_fade_seconds",3.}}) {
+    struct Fade {int toggle,field;const char* enabled;const char* seconds;};
+    for(const auto& fade:std::vector<Fade>{{FadeEnabled,FadeSeconds,"join_fade_enabled","join_fade_seconds"},
+                                         {EdgeFadeEnabled,EdgeFadeSeconds,"edge_fade_enabled","edge_fade_seconds"}}) {
         bool enabled=SendMessageW(control(fade.toggle),BM_GETCHECK,0,0)==BST_CHECKED;
         if(enabled) {
-            auto input=value(fade.field);size_t used=0;double seconds=std::stod(input,&used);
-            if(used!=input.size()||!std::isfinite(seconds)||seconds<.05||seconds>fade.maximum)
-                throw std::runtime_error(fade.field==EdgeFadeSeconds?"首尾淡化时长须为 0.05 到 3 秒。":"接缝淡化时长须为 0.05 到 2 秒。");
-            cfg_[fade.seconds]=seconds;
+            cfg_[fade.seconds]=NumericValue(value(fade.field),*NumericParameter(fade.field));
         }
         cfg_[fade.enabled]=enabled;
     }
@@ -237,12 +255,8 @@ void MainWindow::readRecognitionSettings() {
     cfg_["generate_program_menu"]=SendMessageW(control(MenuEnabled),BM_GETCHECK,0,0)==BST_CHECKED;
 }
 void MainWindow::readEditingSettings() {
-    struct Parameter { int id; const char* key; double min,max; };
-    for(auto p:std::vector<Parameter>{{Before,"strict_pre",0,60},{After,"strict_post",0,60},{Minimum,"strict_min_section",1,600},{DenseGap,"strict_dense_gap",0,120},{Silence,"max_pause_seconds",.3,10},{SilenceDb,"silence_db",-90,-20}}) {
-        
-        auto input=value(p.id);size_t used=0;double n=std::stod(input,&used);
-        if(used!=input.size()||!std::isfinite(n)||n<p.min||n>p.max) throw std::runtime_error("Invalid numeric parameter: "+std::string(p.key));
-        cfg_[p.key]=n;
+    for(int id:{Before,After,Minimum,DenseGap,Silence,SilenceDb}) {
+        const auto& parameter=*NumericParameter(id);cfg_[parameter.key]=NumericValue(value(id),parameter);
     }
     readSoundSettings();
     readFadeSettings();
@@ -267,8 +281,59 @@ void MainWindow::readSettings() {
     } catch(...) {cfg_=previous;throw;}
 }
 void MainWindow::saveSettings() {
-    if(testing()) return;
+    if(testing()) {
+        if(options_.contains("test-autosave")) {auto path=fs::path(Wide(options_["test-autosave"]));path.replace_extension(L".settings.json");WriteJson(path,cfg_);}
+        return;
+    }
     WriteJson(root_/L"config/user.json",cfg_);
+}
+void MainWindow::autoSaveSetting(int id,bool reportInvalid) {
+    if(!settingsReady_||populatingSettings_||busy_)return;
+    pendingSettings_.erase(id);
+    const auto previous=cfg_;bool validated=false;
+    try {
+        auto checked=[&](int controlId){return SendMessageW(control(controlId),BM_GETCHECK,0,0)==BST_CHECKED;};
+        auto choice=[&](const char* key,const std::vector<std::string>& choices) {
+            int selected=static_cast<int>(SendMessageW(control(id),CB_GETCURSEL,0,0));
+            cfg_[key]=choices.at(std::clamp(selected,0,static_cast<int>(choices.size())-1));
+        };
+        if(const auto parameter=NumericParameter(id))cfg_[parameter->key]=NumericValue(value(id),*parameter);
+        else if(IsSoundOption(id)){for(auto [controlId,key]:SoundOptions)if(controlId==id)cfg_[key]=checked(id);}
+        else if(id==FadeEnabled)cfg_["join_fade_enabled"]=checked(id);
+        else if(id==EdgeFadeEnabled)cfg_["edge_fade_enabled"]=checked(id);
+        else if(id==MenuEnabled)cfg_["generate_program_menu"]=checked(id);
+        else if(id==Audit)cfg_["review_enabled"]=cfg_.value("mode","")=="extract"||checked(id);
+        else if(id==ProxyEnabled)cfg_["proxy_enabled"]=checked(id);
+        else if(id==ProxyUrl)cfg_["proxy_url"]=Utf8(value(id));
+        else if(id==Input||id==Output)cfg_[id==Input?"input":"output_dir"]=Utf8(value(id));
+        else if(id==Language)choice("language",{"auto","ko","ja","zh","en"});
+        else if(id==Device)choice("device",{"auto","cuda","cpu"});
+        else if(id==AudioEncoding)choice("audio_output_codec",{"source","flac","pcm","aac"});
+        else if(id==OutputKind)choice("output_kind",{"auto","audio","video"});
+        else if(id==SpeechChoice||id==ReviewChoice)readModelSettings();
+        else if(id==Strict||id==Relaxed||id==Extract) {
+            cfg_["mode"]=id==Strict?"strict":id==Extract?"extract":"relaxed";
+            if(id==Extract)cfg_["review_enabled"]=true;
+        } else return;
+        validated=true;
+        if(cfg_!=previous)saveSettings();
+        if(saveErrorControl_==id) {
+            if(status_==saveError_) {notice_=false;status_.clear();}
+            saveErrorControl_=0;saveError_.clear();InvalidateRect(window_,nullptr,FALSE);
+        }
+    }catch(const std::exception& error) {
+        cfg_=previous;
+        if(validated)pendingSettings_.insert(id); // Retry an I/O failure on the next flush.
+        if(reportInvalid||validated) {
+            saveErrorControl_=id;saveError_=L"设置未保存："+Wide(error.what());notice_=true;status_=saveError_;
+            appendLog(saveError_);InvalidateRect(window_,nullptr,FALSE);
+        }
+    }
+}
+void MainWindow::flushPendingSettings(bool reportInvalid) {
+    KillTimer(window_,SettingsTimer);
+    auto pending=std::move(pendingSettings_);pendingSettings_.clear();
+    for(int id:pending)autoSaveSetting(id,reportInvalid);
 }
 void MainWindow::appendLog(const std::wstring& content) {
     if(GetWindowTextLengthW(control(Log))>120000) text(Log,L"较早日志已收起，完整日志保存在 runtime/logs。\r\n");
@@ -642,11 +707,19 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
     }
     case WM_COMMAND: {
         int id=LOWORD(wp);
-        if(id==ProxyUrl&&HIWORD(wp)==EN_CHANGE&&!busy_) {
-            proxyTested_=false;proxyResults_=json::array();proxyStatus_.clear();
-            if(activeAction_=="testproxy")notice_=false;
-            layout();return 0;
+        if(settingsReady_&&!populatingSettings_&&!busy_&&IsSettingsInput(id)) {
+            if(HIWORD(wp)==EN_CHANGE) {
+                pendingSettings_.insert(id);if(!SetTimer(window_,SettingsTimer,400,nullptr))flushPendingSettings(false);
+                if(id==ProxyUrl) {
+                    proxyTested_=false;proxyResults_=json::array();proxyStatus_.clear();
+                    if(activeAction_=="testproxy")notice_=false;
+                    layout();
+                }
+                return 0;
+            }
+            if(HIWORD(wp)==EN_KILLFOCUS){autoSaveSetting(id);return 0;}
         }
+        if(HIWORD(wp)==CBN_SELCHANGE&&IsSettingsChoice(id)){autoSaveSetting(id);InvalidateRect(window_,nullptr,FALSE);return 0;}
         if(id==History&&HIWORD(wp)==LBN_SELCHANGE) {selectHistory();return 0;}
         if(HIWORD(wp)!=BN_CLICKED) break;
         if(id>=NavTask&&id<=NavLogs) {selectPage(id-NavTask);return 0;}
@@ -668,22 +741,15 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
         if(id==TestProxy) {environmentTask("testproxy");return 0;}
         if(id==ProxyEnabled||id==Audit||id==MenuEnabled||id==FadeEnabled||id==EdgeFadeEnabled||IsSoundOption(id)){
             ToggleChecked(control(id));
+            autoSaveSetting(id);
             if(id==ProxyEnabled){proxyTested_=false;proxyResults_=json::array();proxyStatus_.clear();if(activeAction_=="testproxy")notice_=false;}
             enableControls(busy_);return 0;
         }
         if(id==Language||id==Device||id==OutputKind||id==AudioEncoding){showChoices(id);InvalidateRect(window_,nullptr,FALSE);return 0;}
         if(id==NewTask){selectPage(0);return 0;}
-        if(id==Save) {
-            const auto previous=cfg_;
-            try {
-                if(settingsTab_==0)readEditingSettings();
-                else if(settingsTab_==1)readRecognitionSettings();
-                else readNetworkSettings();
-                saveSettings();notice_=true;status_=L"当前分类已保存。";
-            }catch(const std::exception& e){cfg_=previous;notice_=true;status_=L"无法保存："+Wide(e.what());}
-            InvalidateRect(window_,nullptr,FALSE);return 0;
-        }
         if(id==Reset) {
+            if(busy_)return 0;
+            const auto previous=cfg_;
             try {auto defaults=ReadJson(root_/L"config/defaults.json");
                 const std::vector<std::string> keys=settingsTab_==0?
                     std::vector<std::string>{"max_pause_seconds","silence_db","strict_pre","strict_post","strict_min_section","strict_dense_gap","join_fade_enabled","join_fade_seconds","edge_fade_enabled","edge_fade_seconds"}:
@@ -692,14 +758,14 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
                 for(const auto& key:keys)cfg_[key]=defaults[key];
                 if(settingsTab_==0)for(auto option:SoundOptions)cfg_[option.second]=defaults[option.second];
                 if(cfg_.value("mode","")=="extract")cfg_["review_enabled"]=true;
-                populateSettings(settingsTab_);enableControls(busy_);saveSettings();notice_=true;status_=L"当前分类已恢复默认。";
-            }catch(const std::exception& e){status_=Wide(e.what());}InvalidateRect(window_,nullptr,FALSE);return 0;
+                saveSettings();populateSettings(settingsTab_);enableControls(busy_);notice_=true;status_=L"当前分类已恢复默认。";
+            }catch(const std::exception& e){cfg_=previous;notice_=true;status_=L"无法恢复默认："+Wide(e.what());}InvalidateRect(window_,nullptr,FALSE);return 0;
         }
         if(id==ClearLog) {text(Log,L"");return 0;}
         if(id==OpenLogs) {auto path=root_/L"runtime/logs";fs::create_directories(path);ShellExecuteW(window_,L"open",path.c_str(),nullptr,nullptr,SW_SHOWNORMAL);return 0;}
         if(id==BrowseInput) chooseFile(false);
         else if(id==BrowseOutput) chooseFile(true);
-        else if(id==Strict||id==Relaxed||id==Extract) { cfg_["mode"]=id==Strict?"strict":id==Extract?"extract":"relaxed";if(id==Strict)strictExpanded_=true;refreshMode(); }
+        else if(id==Strict||id==Relaxed||id==Extract) { autoSaveSetting(id);if(id==Strict)strictExpanded_=true;refreshMode(); }
         else if(id==Prompt) prompt();
         else if(id==Start) start(false);
         else if(id==Doctor) start(true);
@@ -750,6 +816,7 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
         return 0;
     }
     case WM_TIMER:
+        if(wp==SettingsTimer){flushPendingSettings(false);return 0;}
         if(wp==20) {
             RECT footer{};GetClientRect(window_,&footer);footer.top=std::max(0L,footer.bottom-d(80));
             InvalidateRect(window_,&footer,FALSE);return 0;
@@ -761,6 +828,7 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
         else if(options_.contains("test-dropdowns")) testDropdowns();
         else if(options_.contains("test-controls")) testControls();
         else if(options_.contains("test-switches")) testSwitches();
+        else if(options_.contains("test-autosave")) testAutoSave();
         else if(options_.contains("test-navigation")) testNavigationRendering();
         else if(options_.contains("test-job")) start(false);
         else if(options_.contains("self-test")) start(true);
@@ -769,6 +837,7 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
         else environmentTask("inspect");
         return 0;
     case WM_CLOSE:
+        flushPendingSettings();
         try { readSettings();saveSettings(); } catch (...) {}
         runner_.cancel();runner_.finish();DestroyWindow(window_);return 0;
     case WM_DESTROY: {
