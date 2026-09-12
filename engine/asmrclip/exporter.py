@@ -175,6 +175,8 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
             # Packet metadata only; cache the keyframe index across speech-review retries.
             if '_video_groups' not in media:media['_video_groups']=video_groups(source,media['video_index'])
             intervals=align_video(source,media['video_index'],source_intervals(meta,frames,plan),media['_video_groups'])
+            from .pauses import limit_video
+            intervals=limit_video(intervals,media['_video_groups'],frames['levels'],meta['frame_samples']/meta['sample_rate'],cfg)
             if reviewer is not None or cfg.get('join_fade_enabled',False):
                 event('progress','按最终视频切点准备独立音轨（不处理画面）',89)
                 candidate=staging/('audio-review'+media['extension'])
@@ -222,14 +224,16 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
                                         'seconds':cfg.get('join_fade_seconds',.3),'joins':[]})
         report['speech_review']=review
         event('progress','检查最终音轨拼接处',98)
-        report['joins']=check_timeline_joins(staging/filename,report) if report.get('timeline_review') else check_joins(staging/filename,report)
+        report['joins'],report['pause_check']=inspect_output_sound(staging/filename,report,cfg)
+        if not report['pause_check']['within_limit']:
+            event('log',f"成片仍有超过 {cfg.get('max_pause_seconds',1.5):g} 秒的低电平空窗，位置已记入空窗检查.csv。")
         report['join_review_count']=sum(r['review_suggested'] for r in report['joins'])
         validate_decode(staging/filename,cfg['ffmpeg'],report)
         report['decode_validation']={'scope':'final_output_only','video_threads':2,'audio_threads':2}
         report['audio_preparation']=meta.get('audio_preparation',{'method':'cached_or_direct_audio_only'})
         report['speech_review']['previous_passes']=plan.get('review_passes',[])
         report.update(source=str(source.resolve()),mode=cfg['mode'],output=str(final_dir/filename),decode_verified=True,
-                      language=plan.get('language','auto'),settings={k:cfg[k] for k in ['strict_pre','strict_post','strict_min_section','strict_dense_gap','silence_db','silence_seconds','audit']})
+                      language=plan.get('language','auto'),settings={k:cfg[k] for k in ['strict_pre','strict_post','strict_min_section','strict_dense_gap','silence_db','max_pause_seconds','audit']})
         report['engine_version']=__version__
         report['settings']['output_kind']=cfg.get('output_kind','auto')
         report['settings'].update(join_fade_enabled=cfg.get('join_fade_enabled',False),join_fade_seconds=cfg.get('join_fade_seconds',.3))
@@ -247,6 +251,10 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
                 writer.writerow([i,clock(s['source_start']),clock(s['source_end']),clock(s['output_start']),clock(s['output_end'])])
         save_json(staging/'校验报告.json',report)
         save_json(staging/'剪辑计划.json',plan)
+        with (staging/'空窗检查.csv').open('w',encoding='utf-8-sig',newline='') as f:
+            writer=csv.writer(f);writer.writerow(['成片开始','成片结束','空窗秒数','设置上限秒数'])
+            for row in report['pause_check']['over_limit']:
+                writer.writerow([clock(row['start']),clock(row['end']),round(row['duration'],3),cfg.get('max_pause_seconds',1.5)])
         with (staging/'接缝淡化.csv').open('w',encoding='utf-8-sig',newline='') as f:
             writer=csv.writer(f);writer.writerow(['成片接缝','淡出秒数','淡入秒数','左侧音量 dBFS','右侧音量 dBFS','右侧减左侧 dB'])
             for row in report['audio_fades']['joins']:
@@ -272,6 +280,7 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
 采样率 {report['sample_rate']} Hz；声道 {report['channels']}。完整解码检查通过。
 VBR 平均码率约 {report['average_bitrate']/1000:.1f} kb/s，会随所保留的内容变化。
 拼接处建议复听数量：{report['join_review_count']}，详情见校验报告。
+最长空窗期设置：{cfg.get('max_pause_seconds',1.5):g} 秒；实际低电平连续空窗最长约 {report['pause_check']['max_detected_seconds']:g} 秒。静音按电平与峰值共同判断，超限位置见空窗检查.csv。
 模式参数与切点依据见剪辑计划和校验报告；原音频未修改。
 使用首个音轨分析并输出；其他音轨、字幕与附件不输出，以免带回未经检查的人声或失效时间轴。
 说话声始终删除。其他声音按“保留声音”选项处理；默认保留轻笑、心跳和 ASMR 道具敲击。检出区间及保留选项见剪辑计划中的 acoustic_exclusions 和校验报告 settings。
@@ -314,3 +323,25 @@ def check_timeline_joins(path,report):
                     index+=1
                 if buffer.shape[1]>8192:origin=cursor-8192;buffer=buffer[:,-8192:]
     return results
+
+
+def inspect_output_sound(path,report,cfg):
+    """Check join discontinuities and final quiet runs in the same audio pass."""
+    from .audio_fades import pcm_blocks
+    from .pauses import QuietMeter
+    rate=report['sample_rate'];channels=report['channels']
+    meter=QuietMeter(rate,channels,cfg['silence_db'])
+    points=[round(row['output_start']*rate) for row in report['mapping'][1:]]
+    results=[];index=0;origin=0;buffer=np.empty((channels,0),np.float32)
+    for offset,x in pcm_blocks(path,report):
+        meter.add(x);buffer=np.concatenate((buffer,x),axis=1);cursor=offset+x.shape[1]
+        while index<len(points) and points[index]+2048<=cursor:
+            cut=points[index]-origin
+            if cut>=2048:
+                samples=buffer[:,cut-2048:cut+2048];diff=np.abs(np.diff(samples,axis=1))
+                jump=float(diff[:,2040:2056].max());nearby=np.concatenate((diff[:,:1984].ravel(),diff[:,2112:].ravel()))
+                ratio=jump/max(float(np.quantile(nearby,.999)),1e-8)
+                results.append({'time':points[index]/rate,'jump':jump,'ratio':ratio,'review_suggested':bool(jump>.01 and ratio>3)})
+            index+=1
+        if buffer.shape[1]>8192:origin=cursor-8192;buffer=buffer[:,-8192:]
+    return results,meter.finish(cfg.get('max_pause_seconds',1.5))

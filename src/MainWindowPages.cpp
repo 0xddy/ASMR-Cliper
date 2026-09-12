@@ -93,7 +93,7 @@ void MainWindow::createControls() {
     add(Progress,-1,PROGRESS_CLASSW,L"",PBS_SMOOTH);SendMessageW(control(Progress),PBM_SETRANGE32,0,1000);SetWindowTheme(control(Progress),L"",L"");SendMessageW(control(Progress),PBM_SETBARCOLOR,0,Accent);SendMessageW(control(Progress),PBM_SETBKCOLOR,0,White);
     setFonts();populateSettings();updateHistory();enableControls(false);
     SendMessageW(window_,WM_CHANGEUISTATE,MAKEWPARAM(UIS_SET,UISF_HIDEFOCUS),0);
-    appendLog(L"ASMR-Cliper 0.6.6");
+    appendLog(L"ASMR-Cliper 0.6.7");
     selectPage(page_);
 }
 
@@ -110,7 +110,7 @@ void MainWindow::populateSettings(int tab) {
     const std::vector<std::string> languages{"auto","ko","ja","zh","en"},devices{"auto","cuda","cpu"};
     auto choose=[&](int id,const auto& choices,const std::string& selected) {auto it=std::find(choices.begin(),choices.end(),selected);SendMessageW(control(id),CB_SETCURSEL,it==choices.end()?0:it-choices.begin(),0);};
     choose(Language,languages,cfg_.value("language","auto"));choose(Device,devices,cfg_.value("device","auto"));
-    for(auto [id,key]:std::vector<std::pair<int,const char*>>{{Silence,"silence_seconds"},{SilenceDb,"silence_db"},{Before,"strict_pre"},{After,"strict_post"},{Minimum,"strict_min_section"},{DenseGap,"strict_dense_gap"}}) text(id,Number(cfg_.value(key,0.)));
+    for(auto [id,key]:std::vector<std::pair<int,const char*>>{{Silence,"max_pause_seconds"},{SilenceDb,"silence_db"},{Before,"strict_pre"},{After,"strict_post"},{Minimum,"strict_min_section"},{DenseGap,"strict_dense_gap"}}) text(id,Number(cfg_.value(key,0.)));
     SendMessageW(control(Audit),BM_SETCHECK,cfg_.value("review_enabled",true)?BST_CHECKED:BST_UNCHECKED,0);
     }
     if(tab<0||tab==1) {
@@ -238,7 +238,7 @@ void MainWindow::paint(HDC dc) {
     auto line=[&](int a,int y,int right) {auto pen=CreatePen(PS_SOLID,1,Line);auto old=SelectObject(dc,pen);MoveToEx(dc,d(a),d(y),nullptr);LineTo(dc,d(right),d(y));SelectObject(dc,old);DeleteObject(pen);};
     RECT side{0,0,d(200),b.bottom};FillRect(dc,&side,white_);
     auto icon=LoadIconW(instance_,MAKEINTRESOURCEW(101));if(icon)DrawIconEx(dc,d(22),d(32),icon,d(24),d(24),0,nullptr,DI_NORMAL);
-    label(L"ASMR-Cliper",54,28,142,32,brandFont_);label(L"v0.6.6",24,h-43,140,20,smallFont_,Muted);
+    label(L"ASMR-Cliper",54,28,142,32,brandFont_);label(L"v0.6.7",24,h-43,140,20,smallFont_,Muted);
     const wchar_t* titles[]={L"剪辑任务",L"处理记录",L"运行环境",L"偏好设置",L"运行日志"};label(titles[page_],x,24,cw-260,42,titleFont_);
     if(page_==0) {
         card(96,374);label(L"音频 / 视频文件",x+24,110,cw-48,24,font_);label(L"输出目录",x+24,194,cw-48,24,font_);
@@ -282,7 +282,7 @@ void MainWindow::paint(HDC dc) {
         if(settingsTab_==0) {
             int col=(cw-64)/2;card(164,436);label(L"分析参数",x+24,176,cw-48,28,boldFont_);
             label(L"语音语言",x+24,211,col,22,smallFont_,Muted);label(L"计算设备",x+40+col,211,col,22,smallFont_,Muted);
-            label(L"长静音时长（秒）",x+24,294,col,22,smallFont_,Muted);label(L"静音电平（dB）",x+40+col,294,col,22,smallFont_,Muted);
+            label(L"最长空窗期（秒）",x+24,294,col,22,smallFont_,Muted);label(L"静音电平（dB）",x+40+col,294,col,22,smallFont_,Muted);
             card(452,600);label(L"严格模式 V2",x+24,468,cw-48,28,boldFont_);
             const wchar_t* names[]={L"说话前余量（秒）",L"说话后余量（秒）",L"最短片段（秒）",L"聊天合并间隔（秒）"};int cell=(cw-96)/4;
             for(int i=0;i<4;++i)label(names[i],x+24+i*(cell+16),508,cell,22,smallFont_,Muted);
@@ -307,7 +307,7 @@ void MainWindow::paint(HDC dc) {
             card(164,460);
             label(L"接缝前逐渐降低音量，接缝后逐渐恢复音量。",x+24,234,cw-48,26,font_);
             label(L"每侧淡化时长（秒）",x+24,272,cw-48,22,smallFont_,Muted);
-            label(L"默认 0.3 秒；短片段自动缩短，片段时长保持不变。",x+24,356,cw-48,26,smallFont_,Muted);
+            label(L"默认 0.3 秒；短片段或空窗上限较小时自动缩短。",x+24,356,cw-48,26,smallFont_,Muted);
             label(L"开启后音轨重新编码；保持采样率、声道，目标码率沿用源音轨。",x+24,394,cw-48,24,smallFont_,Muted);
             label(L"视频画面保持原编码。关闭后恢复原音频包复制。",x+24,420,cw-48,24,smallFont_,Muted);
         }

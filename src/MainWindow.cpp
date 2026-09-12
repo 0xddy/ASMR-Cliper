@@ -114,6 +114,7 @@ MainWindow::MainWindow(fs::path root,json options):root_(std::move(root)),option
     }
     if (options_.contains("test-job")) cfg_.update(ReadJson(fs::path(Wide(options_["test-job"]))));
     if (options_.contains("test-config")) cfg_.update(ReadJson(fs::path(Wide(options_["test-config"]))));
+    cfg_.erase("silence_seconds"); // Old detection threshold is not an output pause limit.
     cfg_["input"]=cfg_.value("input","");
     cfg_["output_dir"]=cfg_.value("output_dir",Utf8((root_/L"output").wstring()));
     white_=CreateSolidBrush(White); background_=CreateSolidBrush(Bg);
@@ -233,7 +234,7 @@ void MainWindow::readSettings() {
     auto lang=static_cast<int>(SendMessageW(control(Language),CB_GETCURSEL,0,0)),device=static_cast<int>(SendMessageW(control(Device),CB_GETCURSEL,0,0));
     cfg_["language"]=languages.at(std::clamp(lang,0,4)); cfg_["device"]=devices.at(std::clamp(device,0,2));
     struct Parameter { int id; const char* key; double min,max; };
-    for(auto p:std::vector<Parameter>{{Before,"strict_pre",0,60},{After,"strict_post",0,60},{Minimum,"strict_min_section",1,600},{DenseGap,"strict_dense_gap",0,120},{Silence,"silence_seconds",2.3,120},{SilenceDb,"silence_db",-100,-20}}) {
+    for(auto p:std::vector<Parameter>{{Before,"strict_pre",0,60},{After,"strict_post",0,60},{Minimum,"strict_min_section",1,600},{DenseGap,"strict_dense_gap",0,120},{Silence,"max_pause_seconds",.3,10},{SilenceDb,"silence_db",-90,-20}}) {
         
         auto input=value(p.id);size_t used=0;double n=std::stod(input,&used);
         if(used!=input.size()||!std::isfinite(n)||n<p.min||n>p.max) throw std::runtime_error("Invalid numeric parameter: "+std::string(p.key));
@@ -481,7 +482,7 @@ void MainWindow::prompt() {
     std::string raw((std::istreambuf_iterator<char>(file)),std::istreambuf_iterator<char>());
     std::wstring content=Wide(raw);
     if(strict) content+=L"\n\n当前界面参数：前余量 "+value(Before)+L" 秒；后余量 "+value(After)+L" 秒；最短连续片段 "+value(Minimum)+L" 秒；聊天合并间隔 "+value(DenseGap)+L" 秒。";
-    content+=L"\n长静音阈值："+value(Silence)+L" 秒。";
+    content+=L"\n最长空窗期："+value(Silence)+L" 秒（按成片连续静音计，包括跨片段接缝）。";
     content+=L"\n\n当前保留声音（说话声始终删除）：";
     bool any=false;
     for(auto [id,key]:SoundOptions)if(SendMessageW(control(id),BM_GETCHECK,0,0)==BST_CHECKED){if(any)content+=L"、";content+=value(id);any=true;}
@@ -667,7 +668,7 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
                 if(settingsTab_==2)for(auto option:SoundOptions)cfg_[option.second]=defaults[option.second];
                 else if(settingsTab_==3)cfg_["generate_program_menu"]=defaults["generate_program_menu"];
                 else if(settingsTab_==4){cfg_["join_fade_enabled"]=defaults["join_fade_enabled"];cfg_["join_fade_seconds"]=defaults["join_fade_seconds"];}
-                else for(auto key:settingsTab_==1?std::vector<std::string>{"proxy_enabled","proxy_url"}:std::vector<std::string>{"language","device","silence_seconds","silence_db","review_enabled","strict_pre","strict_post","strict_min_section","strict_dense_gap"}) cfg_[key]=defaults[key];
+                else for(auto key:settingsTab_==1?std::vector<std::string>{"proxy_enabled","proxy_url"}:std::vector<std::string>{"language","device","max_pause_seconds","silence_db","review_enabled","strict_pre","strict_post","strict_min_section","strict_dense_gap"}) cfg_[key]=defaults[key];
                 populateSettings(settingsTab_);enableControls(busy_);saveSettings();notice_=true;status_=L"已恢复默认设置。";
             }catch(const std::exception& e){status_=Wide(e.what());}InvalidateRect(window_,nullptr,FALSE);return 0;
         }

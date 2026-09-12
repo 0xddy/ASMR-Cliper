@@ -105,7 +105,8 @@ def apply_fades(path, report, cfg, source):
     """Encode audio once, before speech review. No source or final file is edited."""
     if not cfg.get('join_fade_enabled',False) or len(report['mapping'])<2:return report
     path=Path(path);target=path.with_name('faded-'+path.name)
-    rate=report['sample_rate'];seconds=cfg.get('join_fade_seconds',.3)
+    from .pauses import fade_seconds
+    rate=report['sample_rate'];seconds=fade_seconds(cfg)
     ramps,joins=ramps_for(report['mapping'],rate,seconds)
     options,encoding=encoder_options(source,report)
     command=[str(cfg['ffmpeg']),'-hide_banner','-v','error','-nostdin','-y',
@@ -151,6 +152,7 @@ def apply_fades(path, report, cfg, source):
         result={**report,**summary,'payload_unchanged':False,'timeline_review':True,'bytes':target.stat().st_size,
                 'average_bitrate':summary['encoded_payload_bytes']*8/report['duration'],
                 'audio_fades':{'enabled':True,'applied':True,'seconds':seconds,'curve':'linear',
+                               'requested_seconds':cfg.get('join_fade_seconds',.3),
                                'timeline_unchanged':True,'encoding':encoding,'joins':joins}}
         result.pop('copied_packets',None)
         if 'streams' in result:result['streams']={**result['streams'],'audio':signature}

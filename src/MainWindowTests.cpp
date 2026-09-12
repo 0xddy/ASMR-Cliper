@@ -177,6 +177,14 @@ void MainWindow::testControls() {
     wchar_t title[128]{};GetWindowTextW(window_,title,128);
     check("window name and icon",std::wstring(title)==L"ASMR-Cliper"&&GetClassLongPtrW(window_,GCLP_HICON)!=0&&GetClassLongPtrW(window_,GCLP_HICONSM)!=0);
     selectPage(3,0);
+    click(Reset);
+    check("maximum pause defaults to 1.5 seconds",value(Silence)==L"1.5");
+    text(Silence,L"1.2");readSettings();populateSettings(0);
+    check("maximum pause setting reaches job and survives round trip",cfg_["max_pause_seconds"]==1.2&&value(Silence)==L"1.2"&&!cfg_.contains("silence_seconds"));
+    text(Silence,L"0.1");bool rejectedPause=false;try{readSettings();}catch(...){rejectedPause=true;}
+    check("invalid maximum pause is rejected",rejectedPause);
+    text(Silence,L"1.5");readSettings();
+    screenshot(std::filesystem::path(Wide(options_["test-controls"])).parent_path()/L"maximum-pause-settings.png");
     SendMessageW(control(Language),CB_SETCURSEL,2,0);
     SendMessageW(control(Device),CB_SETCURSEL,2,0);
     bool audit=checked(Audit);click(Audit);readSettings();

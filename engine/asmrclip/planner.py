@@ -146,19 +146,20 @@ def make_plan(meta, frames, speech, music, cfg, classifier=None, exclusions=None
             units.append([start,end])
             review.append(record)
 
-    silent=binary_closing(db<cfg['silence_db'],structure=np.ones(5,bool))
-    spans=np.flatnonzero(np.diff(np.r_[False,silent,False])).reshape(-1,2)
-    silence=[[int(a+round(1/dt)),int(b-round(1.2/dt))] for a,b in spans if (b-a)*dt>=cfg['silence_seconds']]
-    keep=[]
+    from .pauses import limit_keeps,quiet_spans
+    quiet=quiet_spans(frames['levels'],cfg['silence_db'])
+    keep=[];silence=[]
     for a,b in units:
-        remaining=complement([[max(0,c-a),min(b-a,d-a)] for c,d in silence if d>a and c<b],b-a)
-        for c,d in remaining:
-            x,y=int(a+c),int(a+d)
-            if cfg['mode']=='strict' and (y-x)*dt<cfg['strict_min_section']*.75:
-                continue
-            if np.sum(db[x:y]>active_db)*dt>=2 and np.mean(db[x:y]>active_db)>=.25:
-                keep.append([x,y])
+        bounded,removed=limit_keeps([[a,b]],frames['levels'],dt,cfg,quiet)
+        # A shortened pause does not turn one accepted scene into new short
+        # scenes that should fail the strict mode's minimum-length rule.
+        active=sum(int(np.sum(db[x:y]>active_db)) for x,y in bounded)
+        length=sum(y-x for x,y in bounded)
+        if active*dt>=2 and active/max(1,length)>=.25:
+            keep.extend(bounded);silence.extend(removed)
     keep=merge(keep)
+    keep,across_joins=limit_keeps(keep,frames['levels'],dt,cfg,quiet)
+    silence=merge(silence+across_joins)
     for a,b in keep:
         if not 0<=a<b<=n:
             raise AssertionError('非法剪辑区间')
@@ -167,4 +168,5 @@ def make_plan(meta, frames, speech, music, cfg, classifier=None, exclusions=None
     return {'mode':cfg['mode'],'keep_frames':keep,'duration':sum(b-a for a,b in keep)*dt,
             'frame_seconds':dt,'spoken':spoken,'music':music,'dense_conversations':dense,
             'boundaries':review,'rejected':rejected,'silence_removed':silence,'acoustic_exclusions':exclusions or {},
+            'max_pause_seconds':cfg.get('max_pause_seconds',1.5),
             'extraction':extraction if cfg['mode']=='extract' else {}}

@@ -9,7 +9,7 @@
   "strict_min_section": 40,
   "strict_dense_gap": 20,
   "silence_db": -58,
-  "silence_seconds": 7,
+  "max_pause_seconds": 1.5,
   "audit": false,
   "review_enabled": true,
   "generate_program_menu": true,

@@ -80,6 +80,9 @@ def settings(data):
     from .exclusions import KEEP_DEFAULTS
     defaults = read_json(ROOT / 'config/defaults.json')
     cfg = {**defaults, **data}
+    # The old value was a detection trigger, not the desired output pause.
+    # Do not migrate a saved 7-second trigger into a 7-second output limit.
+    cfg.pop('silence_seconds',None)
     if cfg.get('output_kind','auto') not in ('auto','audio','video'):
         raise ValueError('未知输出类型。')
     from .model_catalog import required_components,voice_path
@@ -98,7 +101,7 @@ def settings(data):
     if type(cfg['review_max_passes']) is not int or not 1<=cfg['review_max_passes']<=5:raise ValueError('复核轮数必须为 1 到 5 的整数。')
     for name, low, high in [('strict_pre', 0, 60), ('strict_post', 0, 60),
                             ('strict_min_section', 1, 600), ('strict_dense_gap', 0, 120),
-                            ('silence_db', -90, -20), ('silence_seconds', 2.3, 120), ('join_fade_seconds', .05, 2)]:
+                            ('silence_db', -90, -20), ('max_pause_seconds', .3, 10), ('join_fade_seconds', .05, 2)]:
         cfg[name] = float(cfg[name])
         if not low <= cfg[name] <= high:
             raise ValueError(f'{name} 超出允许范围 {low}..{high}')
