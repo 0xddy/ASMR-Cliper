@@ -1,5 +1,13 @@
 # 开发说明
 
+## 0.6.8 偏好设置分组
+
+偏好设置收为「剪辑与声音」「识别与成片」「网络下载」三个分类。声音保留、空窗和淡化并列展示；V2 专用参数折叠。语音和复核模型与语言、设备、复核开关及节目单归在同一分类；运行环境仅管理模型文件和基础组件，通过按钮互相导航。
+
+保留配置键和原有参数。三个读取函数分别负责分类保存，验证失败回滚整次配置变更；`populateSettings(tab)` 只回填当前分类，避免恢复默认时覆盖其他分类或输出类型的未保存输入。开始任务仍整体读取当前表单。复核模型随复核开关启用，V4 强制复核；任务期间锁定设置但允许切换分类。原 `menu` 设置截图参数指向识别分类，`sounds` / `fade` 指向剪辑分类。
+
+现有 GUI 回归覆盖分类独立保存、恢复默认与草稿保留、验证失败回滚、严格参数展开收起、最小窗口布局、模型管理跳转及下拉菜单键盘操作。
+
 ## 0.6.7 可设置的最长空窗期
 
 `max_pause_seconds` 默认 1.5，允许 0.3–10 秒；取代旧 `silence_seconds` 检测门槛，升级时不把旧 7 秒值迁为新上限。GUI 使用原剪辑参数页的数字控件，保存、默认恢复及任务配置共用新键。
@@ -126,7 +134,7 @@ AST 分类缓存版本为 `events-v4`，缓存保存类别证据，不包含保�
 
 GUI 测试参数增加：
 
-- `--snapshot 图片路径 --page task|history|environment|settings|logs`：仅渲染指定页面，不执行任务；网络页额外指定 `--settings-tab network`，保留声音页使用 `--settings-tab sounds`。
+- `--snapshot 图片路径 --page task|history|environment|settings|logs`：仅渲染指定页面，不执行任务；网络分类额外指定 `--settings-tab network`，识别分类使用 `--settings-tab recognition`；剪辑分类为默认值。
 - `--test-action inspect|install|testproxy --test-report JSON路径`：实际启动 GUI 环境任务并记录最终状态；安装可通过 `--test-component` 选择组件。
 - `--test-config JSON路径`：为隐藏测试覆盖配置，不写回用户设置。
 - `--test-navigation JSON路径`：在屏幕外的原生窗口中模拟 49 次切换，只重绘脏控件并检查高亮颜色，验证旧导航及选项卡高亮及时清除；不写回用户设置。

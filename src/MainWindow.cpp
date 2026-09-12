@@ -122,7 +122,9 @@ MainWindow::MainWindow(fs::path root,json options):root_(std::move(root)),option
     try { if(!testing()) {history_=ReadJson(root_/L"config/history.json");if(!history_.is_array())history_=json::array();} } catch(...) {}
     const std::vector<std::string> pages{"task","history","environment","settings","logs"};
     auto page=std::find(pages.begin(),pages.end(),options_.value("page","task"));page_=page==pages.end()?0:static_cast<int>(page-pages.begin());
-    settingsTab_=options_.value("settings-tab","")=="network"?1:options_.value("settings-tab","")=="sounds"?2:options_.value("settings-tab","")=="menu"?3:options_.value("settings-tab","")=="fade"?4:0;
+    const auto setting=options_.value("settings-tab","");
+    settingsTab_=setting=="network"?2:(setting=="recognition"||setting=="menu")?1:0;
+    strictExpanded_=cfg_.value("mode","")=="strict";
     environmentTab_=options_.value("environment-tab","")=="base"?0:1;
 }
 MainWindow::~MainWindow() {
@@ -219,20 +221,15 @@ void MainWindow::readModelSettings() {
     const std::vector<std::string> paths{"models/whisper-review","models/qwen-asr","models/whisper-turbo"};
     cfg_["whisper_model"]=paths.at(std::clamp(speech,0,2));cfg_["review_model"]=paths.at(std::clamp(review,0,1));
 }
-void MainWindow::readSettings() {
+void MainWindow::readRecognitionSettings() {
     readModelSettings();
-    const std::vector<std::string> outputs{"auto","audio","video"};
-    cfg_["output_kind"]=outputs.at(std::clamp(static_cast<int>(SendMessageW(control(OutputKind),CB_GETCURSEL,0,0)),0,2));
-    auto resolve=[&](std::wstring input) {
-        if(input.size()>=2&&input.front()==L'\"'&&input.back()==L'\"') input=input.substr(1,input.size()-2);
-        if(input.empty()) return std::string{};
-        fs::path path(input);if(path.is_relative()) path=root_/path;
-        return Utf8(path.lexically_normal().wstring());
-    };
-    cfg_["input"]=resolve(value(Input)); cfg_["output_dir"]=resolve(value(Output));
     const std::vector<std::string> languages{"auto","ko","ja","zh","en"},devices{"auto","cuda","cpu"};
     auto lang=static_cast<int>(SendMessageW(control(Language),CB_GETCURSEL,0,0)),device=static_cast<int>(SendMessageW(control(Device),CB_GETCURSEL,0,0));
     cfg_["language"]=languages.at(std::clamp(lang,0,4)); cfg_["device"]=devices.at(std::clamp(device,0,2));
+    cfg_["review_enabled"]=cfg_.value("mode","")=="extract"||SendMessageW(control(Audit),BM_GETCHECK,0,0)==BST_CHECKED;
+    cfg_["generate_program_menu"]=SendMessageW(control(MenuEnabled),BM_GETCHECK,0,0)==BST_CHECKED;
+}
+void MainWindow::readEditingSettings() {
     struct Parameter { int id; const char* key; double min,max; };
     for(auto p:std::vector<Parameter>{{Before,"strict_pre",0,60},{After,"strict_post",0,60},{Minimum,"strict_min_section",1,600},{DenseGap,"strict_dense_gap",0,120},{Silence,"max_pause_seconds",.3,10},{SilenceDb,"silence_db",-90,-20}}) {
         
@@ -240,12 +237,27 @@ void MainWindow::readSettings() {
         if(used!=input.size()||!std::isfinite(n)||n<p.min||n>p.max) throw std::runtime_error("Invalid numeric parameter: "+std::string(p.key));
         cfg_[p.key]=n;
     }
-    cfg_["review_enabled"]=SendMessageW(control(Audit),BM_GETCHECK,0,0)==BST_CHECKED;
-    cfg_["generate_program_menu"]=SendMessageW(control(MenuEnabled),BM_GETCHECK,0,0)==BST_CHECKED;
     readSoundSettings();
     readFadeSettings();
+}
+void MainWindow::readNetworkSettings() {
     cfg_["proxy_enabled"]=SendMessageW(control(ProxyEnabled),BM_GETCHECK,0,0)==BST_CHECKED;
     cfg_["proxy_url"]=Utf8(value(ProxyUrl));
+}
+void MainWindow::readSettings() {
+    const auto previous=cfg_;
+    try {
+        const std::vector<std::string> outputs{"auto","audio","video"};
+        cfg_["output_kind"]=outputs.at(std::clamp(static_cast<int>(SendMessageW(control(OutputKind),CB_GETCURSEL,0,0)),0,2));
+        auto resolve=[&](std::wstring input) {
+            if(input.size()>=2&&input.front()==L'\"'&&input.back()==L'\"')input=input.substr(1,input.size()-2);
+            if(input.empty())return std::string{};
+            fs::path path(input);if(path.is_relative())path=root_/path;
+            return Utf8(path.lexically_normal().wstring());
+        };
+        cfg_["input"]=resolve(value(Input));cfg_["output_dir"]=resolve(value(Output));
+        readEditingSettings();readRecognitionSettings();readNetworkSettings();
+    } catch(...) {cfg_=previous;throw;}
 }
 void MainWindow::saveSettings() {
     if(testing()) return;
@@ -631,15 +643,17 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
         if(id==History&&HIWORD(wp)==LBN_SELCHANGE) {selectHistory();return 0;}
         if(HIWORD(wp)!=BN_CLICKED) break;
         if(id>=NavTask&&id<=NavLogs) {selectPage(id-NavTask);return 0;}
-        if(id==SettingsAudio||id==SettingsNetwork||id==SettingsSounds||id==SettingsMenu||id==SettingsFade) {selectPage(3,id==SettingsNetwork?1:id==SettingsSounds?2:id==SettingsMenu?3:id==SettingsFade?4:0);return 0;}
+        if(id==SettingsAudio||id==SettingsNetwork||id==SettingsRecognition) {selectPage(3,id==SettingsNetwork?2:id==SettingsRecognition?1:0);return 0;}
+        if(id==StrictDetails){strictExpanded_=!strictExpanded_;updateVisibility();layout();return 0;}
         if(id==MenuModels){environmentTab_=1;selectPage(2);return 0;}
+        if(id==ModelSettings){selectPage(3,1);return 0;}
         if(id==EnvironmentBase||id==EnvironmentModels) {
             environmentTab_=id==EnvironmentModels?1:0;selectPage(2);return 0;
         }
         if(id==SpeechChoice||id==ReviewChoice) {
-            showChoices(id);readModelSettings();saveSettings();updateVisibility();layout();return 0;
+            showChoices(id);return 0;
         }
-        if(id==EditSettings||id==NetworkSettings) {selectPage(3,id==NetworkSettings?1:0);return 0;}
+        if(id==EditSettings||id==NetworkSettings) {selectPage(3,id==NetworkSettings?2:0);return 0;}
         if(id==Install) {environmentTask("install");return 0;}
         if(id>=RepairPython&&id<=RepairFfmpeg) {const char* keys[]={"python","dependencies","whisper","ast","ffmpeg"};environmentTask("install",keys[id-RepairPython]);return 0;}
         if(id==RepairReview){environmentTask("install","review");return 0;}
@@ -653,30 +667,32 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
         if(id==Language||id==Device||id==OutputKind){showChoices(id);return 0;}
         if(id==NewTask){selectPage(0);return 0;}
         if(id==Save) {
+            const auto previous=cfg_;
             try {
-                if(settingsTab_==1) {cfg_["proxy_enabled"]=SendMessageW(control(ProxyEnabled),BM_GETCHECK,0,0)==BST_CHECKED;cfg_["proxy_url"]=Utf8(value(ProxyUrl));}
-                else if(settingsTab_==2)readSoundSettings();
-                else if(settingsTab_==3)cfg_["generate_program_menu"]=SendMessageW(control(MenuEnabled),BM_GETCHECK,0,0)==BST_CHECKED;
-                else if(settingsTab_==4)readFadeSettings();
-                else readSettings();
-                saveSettings();notice_=true;status_=L"设置已保存。";
-            }catch(const std::exception& e){notice_=true;status_=L"无法保存："+Wide(e.what());}
+                if(settingsTab_==0)readEditingSettings();
+                else if(settingsTab_==1)readRecognitionSettings();
+                else readNetworkSettings();
+                saveSettings();notice_=true;status_=L"当前分类已保存。";
+            }catch(const std::exception& e){cfg_=previous;notice_=true;status_=L"无法保存："+Wide(e.what());}
             InvalidateRect(window_,nullptr,FALSE);return 0;
         }
         if(id==Reset) {
             try {auto defaults=ReadJson(root_/L"config/defaults.json");
-                if(settingsTab_==2)for(auto option:SoundOptions)cfg_[option.second]=defaults[option.second];
-                else if(settingsTab_==3)cfg_["generate_program_menu"]=defaults["generate_program_menu"];
-                else if(settingsTab_==4){cfg_["join_fade_enabled"]=defaults["join_fade_enabled"];cfg_["join_fade_seconds"]=defaults["join_fade_seconds"];}
-                else for(auto key:settingsTab_==1?std::vector<std::string>{"proxy_enabled","proxy_url"}:std::vector<std::string>{"language","device","max_pause_seconds","silence_db","review_enabled","strict_pre","strict_post","strict_min_section","strict_dense_gap"}) cfg_[key]=defaults[key];
-                populateSettings(settingsTab_);enableControls(busy_);saveSettings();notice_=true;status_=L"已恢复默认设置。";
+                const std::vector<std::string> keys=settingsTab_==0?
+                    std::vector<std::string>{"max_pause_seconds","silence_db","strict_pre","strict_post","strict_min_section","strict_dense_gap","join_fade_enabled","join_fade_seconds"}:
+                    settingsTab_==1?std::vector<std::string>{"language","device","speech_model","review_model_id","whisper_model","review_model","review_enabled","generate_program_menu"}:
+                    std::vector<std::string>{"proxy_enabled","proxy_url"};
+                for(const auto& key:keys)cfg_[key]=defaults[key];
+                if(settingsTab_==0)for(auto option:SoundOptions)cfg_[option.second]=defaults[option.second];
+                if(cfg_.value("mode","")=="extract")cfg_["review_enabled"]=true;
+                populateSettings(settingsTab_);enableControls(busy_);saveSettings();notice_=true;status_=L"当前分类已恢复默认。";
             }catch(const std::exception& e){status_=Wide(e.what());}InvalidateRect(window_,nullptr,FALSE);return 0;
         }
         if(id==ClearLog) {text(Log,L"");return 0;}
         if(id==OpenLogs) {auto path=root_/L"runtime/logs";fs::create_directories(path);ShellExecuteW(window_,L"open",path.c_str(),nullptr,nullptr,SW_SHOWNORMAL);return 0;}
         if(id==BrowseInput) chooseFile(false);
         else if(id==BrowseOutput) chooseFile(true);
-        else if(id==Strict||id==Relaxed||id==Extract) { cfg_["mode"]=id==Strict?"strict":id==Extract?"extract":"relaxed";refreshMode(); }
+        else if(id==Strict||id==Relaxed||id==Extract) { cfg_["mode"]=id==Strict?"strict":id==Extract?"extract":"relaxed";if(id==Strict)strictExpanded_=true;refreshMode(); }
         else if(id==Prompt) prompt();
         else if(id==Start) start(false);
         else if(id==Doctor) start(true);

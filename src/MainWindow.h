@@ -12,8 +12,8 @@ enum ControlId { Input=101, Output, BrowseInput, BrowseOutput, Strict, Relaxed, 
     ProxyEnabled, ProxyUrl, TestProxy, SilenceDb, History, OpenLogs, ClearLog, NewTask,
     SettingsSounds, KeepSoftLaugh, KeepLoudLaugh, KeepVaping, KeepDrinking, KeepImpacts, Extract, RepairReview, ReviewFindings,
     EnvironmentBase, EnvironmentModels, SpeechChoice, ReviewChoice, RepairQwen, RepairAligner, RepairClap, RepairNeural,
-    KeepHeartbeat, KeepTapping, OutputKind, ProgramMenu, SettingsMenu, MenuEnabled, MenuModels,
-    SettingsFade, FadeEnabled, FadeSeconds };
+    KeepHeartbeat, KeepTapping, OutputKind, ProgramMenu, SettingsRecognition, MenuEnabled, MenuModels,
+    SettingsFade, FadeEnabled, FadeSeconds, StrictDetails, ModelSettings };
 
 inline constexpr std::pair<int,const char*> SoundOptions[] = {
     {KeepSoftLaugh,"keep_soft_laugh"},{KeepHeartbeat,"keep_heartbeat"},{KeepTapping,"keep_tapping"},
@@ -41,6 +41,9 @@ private:
     void refreshMode();
     void enableControls(bool busy);
     void readSettings();
+    void readEditingSettings();
+    void readRecognitionSettings();
+    void readNetworkSettings();
     void readSoundSettings();
     void readFadeSettings();
     void readModelSettings();
@@ -111,6 +114,7 @@ private:
     ULONGLONG taskStarted_ = 0, taskElapsed_ = 0;
     bool timing_ = false, hasTiming_ = false;
     bool mediaReady_ = false;
+    bool strictExpanded_ = false;
     std::string activeOutput_;
     int dropdownTestId_ = 0;
     bool dropdownTestCancel_ = false, dropdownTestIdle_ = false;
