@@ -169,7 +169,11 @@ void MainWindow::testControls() {
     selectPage(0);SendMessageW(control(OutputKind),CB_SETCURSEL,2,0);readSettings();
     check("video output choice reaches job settings",cfg_["output_kind"]=="video");
     populateSettings();check("output choice round trip",SendMessageW(control(OutputKind),CB_GETCURSEL,0,0)==2);
+    choose(OutputKind,3);populateSettings();
+    check("precise video selection saves and round trips",cfg_["output_kind"]=="video"&&cfg_["video_cut_mode"]=="precise"&&SendMessageW(control(OutputKind),CB_GETCURSEL,0,0)==3);
+    screenshot(folder/L"precise-video-output.png");
     SendMessageW(control(OutputKind),CB_SETCURSEL,0,0);readSettings();
+    check("default output returns to original video packets",cfg_["video_cut_mode"]=="copy");
     wchar_t title[128]{};GetWindowTextW(window_,title,128);
     check("window name and icon",std::wstring(title)==L"ASMR-Cliper"&&GetClassLongPtrW(window_,GCLP_HICON)!=0&&GetClassLongPtrW(window_,GCLP_HICONSM)!=0);
     selectPage(2);click(EnvironmentModels);

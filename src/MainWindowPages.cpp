@@ -55,7 +55,7 @@ void MainWindow::createControls() {
     add(Output,0,L"EDIT",Wide(cfg_["output_dir"]),WS_TABSTOP|ES_AUTOHSCROLL);
     button(BrowseInput,0,L"选择文件");button(BrowseOutput,0,L"更改目录");
     button(OutputKind,0,L"");InitChoiceControl(control(OutputKind));
-    for(auto label:{L"跟随输入",L"仅音频",L"视频（画面原编码）"})SendMessageW(control(OutputKind),CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label));
+    for(auto label:{L"跟随输入",L"仅音频",L"视频（画面原编码）",L"视频（精确切割）"})SendMessageW(control(OutputKind),CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label));
     button(Strict,0,L"严格模式  V2");button(Relaxed,0,L"宽松模式  V3");button(Extract,0,L"提取模式  V4");
     
     button(Start,0,L"开始剪辑");button(EditSettings,0,L"剪辑参数");button(Prompt,0,L"模式说明");
@@ -99,7 +99,7 @@ void MainWindow::createControls() {
     setFonts();populateSettings();updateHistory();enableControls(false);
     settingsReady_=true;
     SendMessageW(window_,WM_CHANGEUISTATE,MAKEWPARAM(UIS_SET,UISF_HIDEFOCUS),0);
-    appendLog(L"ASMR-Cliper 0.6.13");
+    appendLog(L"ASMR-Cliper 0.6.14");
     selectPage(page_);
 }
 
@@ -111,7 +111,9 @@ void MainWindow::populateSettings(int tab) {
     if(tab<0) {
         const std::vector<std::string> outputs{"auto","audio","video"};
         auto output=std::find(outputs.begin(),outputs.end(),cfg_.value("output_kind","auto"));
-        SendMessageW(control(OutputKind),CB_SETCURSEL,output==outputs.end()?0:output-outputs.begin(),0);
+        int selected=output==outputs.end()?0:static_cast<int>(output-outputs.begin());
+        if(selected==2&&cfg_.value("video_cut_mode","copy")=="precise")selected=3;
+        SendMessageW(control(OutputKind),CB_SETCURSEL,selected,0);
     }
     if(tab<0||tab==1) {
         const std::vector<std::string> models{"whisper-large-v3","qwen3-asr","whisper-turbo"};
@@ -267,12 +269,12 @@ void MainWindow::paint(HDC dc) {
     auto line=[&](int a,int y,int right) {auto pen=CreatePen(PS_SOLID,1,Line);auto old=SelectObject(dc,pen);MoveToEx(dc,d(a),d(y),nullptr);LineTo(dc,d(right),d(y));SelectObject(dc,old);DeleteObject(pen);};
     RECT side{0,0,d(200),b.bottom};FillRect(dc,&side,white_);
     auto icon=LoadIconW(instance_,MAKEINTRESOURCEW(101));if(icon)DrawIconEx(dc,d(22),d(32),icon,d(24),d(24),0,nullptr,DI_NORMAL);
-    label(L"ASMR-Cliper",54,28,142,32,brandFont_);label(L"v0.6.13",24,h-43,140,20,smallFont_,Muted);
+    label(L"ASMR-Cliper",54,28,142,32,brandFont_);label(L"v0.6.14",24,h-43,140,20,smallFont_,Muted);
     const wchar_t* titles[]={L"剪辑任务",L"处理记录",L"运行环境",L"偏好设置",L"运行日志"};label(titles[page_],x,24,cw-260,42,titleFont_);
     if(page_==0) {
         card(96,374);label(L"音频 / 视频文件",x+24,110,cw-48,24,font_);label(L"输出目录",x+24,194,cw-48,24,font_);
         label(L"输出类型",x+24,278,236,24,font_);
-        label((cfg_.value("join_fade_enabled",false)||cfg_.value("edge_fade_enabled",true)||cfg_.value("audio_output_codec","source")!="source")?L"音轨按设置编码 · 保持源采样率和声道，画面原编码":L"保留源编码 · 视频按关键帧向内调整切点",x+280,310,cw-304,40,smallFont_,Muted);
+        label(cfg_.value("video_cut_mode","copy")=="precise"?L"画面重新编码 · 不受原关键帧限制，音轨按设置输出":(cfg_.value("join_fade_enabled",false)||cfg_.value("edge_fade_enabled",true)||cfg_.value("audio_output_codec","source")!="source")?L"音轨按设置编码 · 保持源采样率和声道，画面原编码":L"保留源编码 · 视频按关键帧向内调整切点",x+280,310,cw-304,40,smallFont_,Muted);
         label(L"剪辑模式",x,394,cw-140,36,boldFont_);
     } else if(page_==1) {
         if(history_.empty()) {

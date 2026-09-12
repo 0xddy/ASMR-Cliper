@@ -85,6 +85,8 @@ def settings(data):
     cfg.pop('silence_seconds',None)
     if cfg.get('output_kind','auto') not in ('auto','audio','video'):
         raise ValueError('未知输出类型。')
+    if cfg.get('video_cut_mode','copy') not in ('copy','precise'):
+        raise ValueError('未知视频剪辑方式。')
     if cfg.get('audio_output_codec','source') not in ('source','flac','pcm','aac'):
         raise ValueError('未知输出音频编码。')
     from .model_catalog import required_components,voice_path

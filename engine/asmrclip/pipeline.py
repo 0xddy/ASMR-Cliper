@@ -50,7 +50,7 @@ def run(data):
     from .model_catalog import validate_models
     from .common import ROOT
     media=inspect_media(source,cfg.get('output_kind','auto'))
-    event('log',('输出视频，画面原编码复制；切点按关键帧向内调整。' if media['kind']=='video' else '输出音频。')+
+    event('log',(('输出视频，按视频帧精确切割并重新编码画面。' if cfg.get('video_cut_mode')=='precise' else '输出视频，画面原编码复制；切点按关键帧向内调整。') if media['kind']=='video' else '输出音频。')+
           (' 音轨将按输出设置处理并编码，保持源采样率与声道。' if cfg['join_fade_enabled'] or cfg['edge_fade_enabled'] or cfg['audio_output_codec']!='source' else ' 音轨原编码包直接复制。'))
     if media['audio_tracks']>1:event('log',f'检测到 {media["audio_tracks"]} 个音轨：本次只分析并输出第一个音轨。')
     validate_models(cfg,ROOT)

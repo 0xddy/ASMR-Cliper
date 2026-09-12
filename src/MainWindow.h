@@ -42,6 +42,7 @@ private:
     void refreshMode();
     void enableControls(bool busy);
     void readSettings();
+    void readOutputSettings();
     void readEditingSettings();
     void readRecognitionSettings();
     void readNetworkSettings();

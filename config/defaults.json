@@ -33,5 +33,6 @@
   "proxy_enabled": true,
   "proxy_url": "http://127.0.0.1:10886",
   "output_kind": "auto",
+  "video_cut_mode": "copy",
   "audio_output_codec": "source"
 }

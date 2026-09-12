@@ -95,7 +95,7 @@ def align_video(source,index,intervals,groups=None):
             aligned.append({'source_start':group['start'],'source_end':group['end'],
                             'first':group['first'],'stop':group['stop'],'interval':cursor})
     if not aligned:
-        raise ValueError('保留区间内没有可完整复制的视频关键帧片段。可选择“仅音频”，或保留更长片段。')
+        raise ValueError('保留区间内没有可完整复制的视频关键帧片段。请选择“视频（精确切割）”重新编码画面，或选择“仅音频”。')
     for row in aligned:
         original=intervals[row.pop('interval')]
         row['analysis_start']=original['analysis_start']+row['source_start']-original['source_start']

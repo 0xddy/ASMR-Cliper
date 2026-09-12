@@ -265,11 +265,15 @@ void MainWindow::readNetworkSettings() {
     cfg_["proxy_enabled"]=SendMessageW(control(ProxyEnabled),BM_GETCHECK,0,0)==BST_CHECKED;
     cfg_["proxy_url"]=Utf8(value(ProxyUrl));
 }
+void MainWindow::readOutputSettings() {
+    int selected=std::clamp(static_cast<int>(SendMessageW(control(OutputKind),CB_GETCURSEL,0,0)),0,3);
+    const std::vector<std::string> outputs{"auto","audio","video","video"};
+    cfg_["output_kind"]=outputs.at(selected);cfg_["video_cut_mode"]=selected==3?"precise":"copy";
+}
 void MainWindow::readSettings() {
     const auto previous=cfg_;
     try {
-        const std::vector<std::string> outputs{"auto","audio","video"};
-        cfg_["output_kind"]=outputs.at(std::clamp(static_cast<int>(SendMessageW(control(OutputKind),CB_GETCURSEL,0,0)),0,2));
+        readOutputSettings();
         auto resolve=[&](std::wstring input) {
             if(input.size()>=2&&input.front()==L'\"'&&input.back()==L'\"')input=input.substr(1,input.size()-2);
             if(input.empty())return std::string{};
@@ -309,7 +313,7 @@ void MainWindow::autoSaveSetting(int id,bool reportInvalid) {
         else if(id==Language)choice("language",{"auto","ko","ja","zh","en"});
         else if(id==Device)choice("device",{"auto","cuda","cpu"});
         else if(id==AudioEncoding)choice("audio_output_codec",{"source","flac","pcm","aac"});
-        else if(id==OutputKind)choice("output_kind",{"auto","audio","video"});
+        else if(id==OutputKind)readOutputSettings();
         else if(id==SpeechChoice||id==ReviewChoice)readModelSettings();
         else if(id==Strict||id==Relaxed||id==Extract) {
             cfg_["mode"]=id==Strict?"strict":id==Extract?"extract":"relaxed";

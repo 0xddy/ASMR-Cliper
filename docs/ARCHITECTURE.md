@@ -1,5 +1,15 @@
 # 开发说明
 
+## 0.6.14 视频精确切割
+
+新增 `video_cut_mode=copy|precise`，默认 copy；GUI 的「视频（精确切割）」保存为 `output_kind=video` + `video_cut_mode=precise`，自动保存并回填。原包复制路径不变，无法保留完整 GOP 的错误提示指向精确切割选项。
+
+`video_encode.py` 仅读取视频包的显示时间戳和帧长建立索引，每个声音保留区间向内对齐到完整视频帧。音轨先按最终映射复制 / 淡化 / 转码并复核；只有可发布时才处理画面。逐段从之前的关键帧解码参考帧，只编码被批准的帧，并验证每帧 PTS 与索引一致。输出使用同一拼接时钟，保留可变帧间隔、分辨率、像素位深、色彩参数、SAR 和 display matrix；不依赖原 GOP 边界作为切点。
+
+H.264 或其他 8 位源使用 H.264，HEVC 或更高位深使用 HEVC；高质量有损编码（CRF / CQ 18）。自动 / CUDA 设备与兼容像素格式尝试 NVENC，编码失败后删除中间文件并回退 libx264 / libx265；显式 CPU 跳过 NVENC。解码和软件编码限制线程，进度显示已编码视频帧数。精确视频和已确认音轨以 `-c copy` 合并，逐包验证两个流的内容和时间戳，再进行最终完整解码；编码与合并中间文件由现有 staging 生命周期清理。
+
+报告记录 `video_payload_unchanged=false`、`video_encoding`、`video_frame_trim_seconds` 和最终映射，音轨的 `payload_unchanged` 独立记录。测试覆盖无关键帧短区间、偏移时间戳、多段拼接、VFR / WebM、旋转方向、10 位 HEVC 色彩参数、FLAC 与淡化、复核拒绝时不编码画面，以及 NVENC 回退。参考 [FFmpeg 的 seek 与 streamcopy 说明](https://ffmpeg.org/ffmpeg.html)。以下版本小节保留历史实现背景。
+
 ## 0.6.13 任务缓存生命周期
 
 `task_cache.py` 管理指纹目录及 `program-menus/<指纹>` 的分析缓存。成片通过最终导出校验并原子发布后，在节目单推理之前释放识别器、分类器、复核器和分析 WAV 的 mmap，再清理 PCM、独立音轨、帧特征、转写、语义分类、提取证据、复核重试及推理中转文件。导出目录已有剪辑计划、时间对照、复核位置和校验报告。节目单旁置文件写入成功后清理自己的窗口缓存；不再专门写一份随后立即删除的完整窗口证据。

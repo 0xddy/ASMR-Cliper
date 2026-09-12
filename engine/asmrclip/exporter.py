@@ -158,6 +158,11 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
     from .media import inspect_media,copy_media_packets,align_video,source_intervals,video_groups
     from .audio_fades import apply_fades,mux_faded_audio,audio_processing_enabled,output_extension,fade_status
     media=media_context if media_context is not None else inspect_media(source,cfg.get('output_kind','auto'))
+    precise=media['kind']=='video' and cfg.get('video_cut_mode','copy')=='precise'
+    if precise:
+        from .video_encode import align_frames,encode_video,mux_video
+        # H.264 / HEVC pictures need a compatible container, even for WebM inputs.
+        media['extension']='.mp4' if media['extension'] in ('.mp4','.mov') and media['audio_codec'] in ('aac','alac','mp3') else '.mkv'
     output_dir=Path(output_dir).resolve()
     output_dir.mkdir(parents=True,exist_ok=True)
     token=uuid.uuid4().hex[:8]
@@ -176,11 +181,15 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
         candidate=None;intervals=None;report=None
         if media['kind']=='video':
             # Packet metadata only; cache the keyframe index across speech-review retries.
-            if '_video_groups' not in media:media['_video_groups']=video_groups(source,media['video_index'])
-            intervals=align_video(source,media['video_index'],source_intervals(meta,frames,plan),media['_video_groups'])
-            from .pauses import limit_video
-            intervals=limit_video(intervals,media['_video_groups'],frames['levels'],meta['frame_samples']/meta['sample_rate'],cfg)
-            if reviewer is not None or audio_processing_enabled(cfg):
+            if precise:
+                event('progress','按视频帧精度确定切点（无需完整关键帧组）',89)
+                intervals=align_frames(source,meta,frames,plan,media)
+            else:
+                if '_video_groups' not in media:media['_video_groups']=video_groups(source,media['video_index'])
+                intervals=align_video(source,media['video_index'],source_intervals(meta,frames,plan),media['_video_groups'])
+                from .pauses import limit_video
+                intervals=limit_video(intervals,media['_video_groups'],frames['levels'],meta['frame_samples']/meta['sample_rate'],cfg)
+            if precise or reviewer is not None or audio_processing_enabled(cfg):
                 event('progress','按最终视频切点准备独立音轨（不处理画面）',89)
                 candidate=processed_audio
                 audio_media={**media,'kind':'audio','video_index':None,'video_codec':None}
@@ -214,14 +223,22 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
         from .progress import phase
         phase(6, '复核通过，准备导出' if review['status']=='passed' else '准备最终导出与校验', legacy=(98,100))
         if media['kind']=='video':
-            event('progress','按已确认时间轴复制视频与音轨，合并封装',98)
-            final=copy_media_packets(source,staging/filename,meta,frames,plan,{**media,'extension':extension},intervals)
+            if precise:
+                event('progress','音轨已确认，开始精确剪辑并编码画面',98)
+                video=staging/('video-encoded'+extension)
+                encoded=encode_video(source,video,media,report,cfg)
+                final=mux_video(video,candidate,staging/filename,report,encoded,cfg)
+                final['video_frame_trim_seconds']=sum(r['source_end']-r['source_start'] for r in source_intervals(meta,frames,plan))-final['duration']
+                video.unlink()
+            else:
+                event('progress','按已确认时间轴复制视频与音轨，合并封装',98)
+                final=copy_media_packets(source,staging/filename,meta,frames,plan,{**media,'extension':extension},intervals)
+                if candidate is not None:
+                    if not report['payload_unchanged']:
+                        final=mux_faded_audio(staging/filename,candidate,final,report,cfg)
+                    else:verify_reviewed_audio(report,final)
             if candidate is not None:
-                if not report['payload_unchanged']:
-                    final=mux_faded_audio(staging/filename,candidate,final,report,cfg)
-                else:verify_reviewed_audio(report,final)
-                review['export_mapping']=final['mapping']
-                candidate.unlink()
+                review['export_mapping']=final['mapping'];candidate.unlink()
             report=final
             report['audio_review_before_video_export']=reviewer is not None
         report.setdefault('audio_fades',fade_status(cfg))
@@ -239,6 +256,7 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
                       language=plan.get('language','auto'),settings={k:cfg[k] for k in ['strict_pre','strict_post','strict_min_section','strict_dense_gap','silence_db','max_pause_seconds','audit']})
         report['engine_version']=__version__
         report['settings']['output_kind']=cfg.get('output_kind','auto')
+        report['settings']['video_cut_mode']=cfg.get('video_cut_mode','copy')
         report['settings']['audio_output_codec']=cfg.get('audio_output_codec','source')
         report['settings'].update(join_fade_enabled=cfg.get('join_fade_enabled',False),join_fade_seconds=cfg.get('join_fade_seconds',.3),
                                   edge_fade_enabled=cfg.get('edge_fade_enabled',True),edge_fade_seconds=cfg.get('edge_fade_seconds',.5))
@@ -277,10 +295,12 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
             for r in report['transition_review'].get('candidates',[]):
                 writer.writerow([clock(r['start']),clock(r['end']),labels[r['decision']],r['reason']])
         review_status={'passed':'模型未检出残留话语','needs_review':'仍有疑似话语，待复听位置见人声复核.csv','disabled':'未开启'}[report['speech_review']['status']]
-        video_note=(f"视频 {report['video_codec']} 原编码复制；关键帧向内调整额外剪去 {report['keyframe_trim_seconds']:.3f} 秒。\n"
+        video_note=(f"视频 {report['video_codec']} 精确切割并重新编码（{report['video_encoding']['encoder']}）；按视频帧向内调整额外剪去 {report['video_frame_trim_seconds']:.3f} 秒。\n"
+                    "画面经过有损编码，源分辨率和保留帧时间轴不变；最终音轨与已确认音轨的包内容和时间戳校验通过。\n") if precise else (
+                    f"视频 {report['video_codec']} 原编码复制；关键帧向内调整额外剪去 {report['keyframe_trim_seconds']:.3f} 秒。\n"
                     f"视频包原样校验通过；音画使用同一时间轴，音轨边界留空最多 {report['max_audio_boundary_gap']*1000:.1f} 毫秒。\n") if media['kind']=='video' else ''
         audio_note=(f"音轨已处理；首尾 {len(report['audio_fades']['edges'])} 处，接缝 {len(report['audio_fades']['joins'])} 处；音轨重新编码为 {report['codec']}。\n"
-                    "淡出后淡入，不重叠片段、不改变时间轴；视频画面仍复制原编码包。\n"
+                    "淡出后淡入，不重叠片段、不改变时间轴。\n"
                     "采样率与声道沿用源音轨；编码和目标码率见校验报告 audio_encoding。实际淡化位置见首尾淡化.csv、接缝淡化.csv。") if not report['payload_unchanged'] else (
                     f"复制原 {report['codec']} 音频包，未重新编码。保留帧 SHA-256 与包长度校验通过。")
         note=f'''ASMR-Cliper {__version__} · {title}
