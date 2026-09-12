@@ -4,10 +4,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -66,6 +67,68 @@ class PackagingTests(unittest.TestCase):
     def test_install_refuses_system_python_or_developer_venv(self):
         with self.assertRaisesRegex(RuntimeError, 'staged'):
             bundle.assert_core_python(self.root)
+
+    def make_crt(self):
+        crt = self.folder / 'Microsoft.VC143.CRT'
+        crt.mkdir()
+        for name in ('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140_2.dll'):
+            (crt / name).write_bytes(('VS redistributable: ' + name).encode('ascii'))
+        return crt
+
+    def test_prepare_replaces_embedded_crt_before_starting_staged_python(self):
+        crt = self.make_crt()
+        source = self.root
+        for name in bundle.SOURCE_FILES:
+            self.put(name, (ROOT / name).read_bytes())
+        archive = self.folder / 'python.zip'
+        with zipfile.ZipFile(archive, 'w') as package:
+            package.writestr('python.exe', b'embedded interpreter')
+            package.writestr('vcruntime140.dll', b'older embedded CRT')
+        manifest = bundle.read(source / 'config/environment.json')
+        manifest['python'].update(sha256=bundle.sha256(archive), size=archive.stat().st_size)
+        bundle.save(source / 'config/environment.json', manifest)
+        target = self.folder / 'prepared payload 中文'
+
+        bundle.prepare(source, target, archive, crt)
+
+        for dll in crt.glob('*.dll'):
+            self.assertEqual((target / 'runtime/python' / dll.name).read_bytes(), dll.read_bytes())
+        self.assertEqual((target / 'runtime/python/python.exe').read_bytes(), b'embedded interpreter')
+
+    def test_install_preserves_locked_core_crt_and_restores_neural_crt(self):
+        crt = self.make_crt()
+        core = self.root / 'runtime/python'
+        bundle.copy_crt(crt, core)
+        self.put('config/defaults.json', b'{}')
+        bundle.save(self.root / 'config/environment.json', bundle.read(ROOT / 'config/environment.json'))
+        self.put('build-info.json', b'{}')
+        self.put('runtime/downloads/ffmpeg-essentials.zip', b'FFmpeg archive')
+        manager, neural = Mock(), Mock()
+        # Extracting neural Python replaces its bundled CRT; install must restore the VS set.
+        neural.install.side_effect = lambda *args, **kwargs: self.put(
+            'runtime/neural/vcruntime140.dll', b'older embedded CRT')
+        copy_file = shutil.copy2
+
+        def copy_unlocked(source, target):
+            if Path(target).parent == core:
+                raise PermissionError('WinError 32: running core Python has locked its CRT')
+            return copy_file(source, target)
+
+        # Stub network/package work while preserving actual CRT copies and build-info output.
+        with (patch.dict(sys.modules, {'environment_manager': manager, 'neural_environment': neural}),
+              patch.object(sys, 'executable', str(core / 'python.exe')),
+              patch.object(bundle, 'assets', return_value=[]),
+              patch.object(bundle.shutil, 'copy2', side_effect=copy_unlocked),
+              patch.object(bundle.subprocess, 'run', return_value=Mock(stdout='[]'))):
+            bundle.install(self.root, crt)
+
+        manager.install_dependencies.assert_called_once()
+        neural.install.assert_called_once()
+        for name in ('python', 'neural'):
+            for dll in crt.glob('*.dll'):
+                self.assertEqual((self.root / 'runtime' / name / dll.name).read_bytes(), dll.read_bytes())
+        self.assertEqual(bundle.read(self.root / 'build-info.json')['crt'],
+                         [{'name': dll.name, 'sha256': bundle.sha256(dll)} for dll in sorted(crt.glob('*.dll'))])
 
     def test_offline_probes_cannot_use_developer_python_cuda_or_proxy(self):
         environment = {'SystemRoot': 'C:\\Windows', 'PYTHONPATH': 'G:\\private', 'PYTHONHOME': 'G:\\python',

@@ -51,13 +51,6 @@ try {
     $bootstrap = Join-Path $work 'bootstrap'
     Expand-Archive -LiteralPath $bootstrapZip -DestinationPath $bootstrap
     $bootstrapPython = Join-Path $bootstrap 'python.exe'
-    # Build and test with spaces and Unicode in the path; move before final validation.
-    $payload = Join-Path $work 'payload/ASMR Cliper 构建'
-    $builder = Join-Path $source 'scripts/package_win64_nv.py'
-    Invoke-Checked $bootstrapPython @('-X','utf8',$builder,'prepare','--source',$source,'--root',$payload,'--python-archive',$bootstrapZip)
-    $python = Join-Path $payload 'runtime/python/python.exe'
-    $builder = Join-Path $payload 'scripts/package_win64_nv.py'
-
     # App-local Microsoft CRT DLLs: no global redistributable installer is needed.
     $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
     $vs = & $vswhere -latest -products '*' -version '[17.0,18.0)' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
@@ -68,6 +61,14 @@ try {
         ForEach-Object { Join-Path $_.FullName 'x64/Microsoft.VC143.CRT' } |
         Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
     if (-not $crt) { throw 'The x64 Microsoft.VC143.CRT redistributable files are missing.' }
+
+    # Stage CRT with bootstrap Python before starting the payload interpreter, which locks its DLLs.
+    # Build and test with spaces and Unicode in the path; move before final validation.
+    $payload = Join-Path $work 'payload/ASMR Cliper 构建'
+    $builder = Join-Path $source 'scripts/package_win64_nv.py'
+    Invoke-Checked $bootstrapPython @('-X','utf8',$builder,'prepare','--source',$source,'--root',$payload,'--python-archive',$bootstrapZip,'--crt',$crt)
+    $python = Join-Path $payload 'runtime/python/python.exe'
+    $builder = Join-Path $payload 'scripts/package_win64_nv.py'
     Invoke-Checked $python @('-X','utf8',$builder,'install','--root',$payload,'--crt',$crt)
 
     Invoke-Checked $bootstrapPython @('-X','utf8',$builder,'snapshot','--root',$payload,'--output',(Join-Path $work 'dependencies'))

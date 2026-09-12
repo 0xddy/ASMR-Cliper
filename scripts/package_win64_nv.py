@@ -71,7 +71,7 @@ def excluded(path):
             path.name in ('user.json', 'history.json') or path.name.endswith(('.part', '.part.json')))
 
 
-def prepare(source, root, python_archive):
+def prepare(source, root, python_archive, crt):
     if root.exists():
         raise ValueError('Package staging directory already exists.')
     root.mkdir(parents=True)
@@ -93,6 +93,8 @@ def prepare(source, root, python_archive):
     if sha256(python_archive) != manifest['python']['sha256'] or python_archive.stat().st_size != manifest['python']['size']:
         raise ValueError('Embedded Python archive does not match the manifest.')
     extract_checked(python_archive, root / 'runtime/python')
+    # Bootstrap Python runs this phase; the staged interpreter must not load these DLLs yet.
+    copy_crt(crt, root / 'runtime/python')
     (root / 'runtime/python/python312._pth').write_text(PTH, encoding='ascii')
     (root / 'runtime/python/Lib/site-packages').mkdir(parents=True, exist_ok=True)
     shutil.copy2(source / 'docs/PORTABLE_README.md', root / 'README.md')
@@ -154,7 +156,7 @@ def install(root, crt):
     if proxy:
         manager.CONFIG.update(proxy_enabled=True, proxy_url=proxy)
     manifest = read(root / 'config/environment.json')
-    copy_crt(crt, root / 'runtime/python')
+    # Core CRT was staged by prepare, before this interpreter loaded and locked its DLLs.
     copy_crt(crt, root / 'runtime/neural')
     # Neither environment inherits a system pip index/cache configuration.
     env = clean_env(root)
@@ -347,12 +349,12 @@ def main():
     parser.add_argument('--report', type=Path)
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
-    required = {'prepare': ('source', 'python_archive'), 'install': ('crt',), 'verify': ('report',), 'archive': ('output',), 'snapshot': ('output',)}
+    required = {'prepare': ('source', 'python_archive', 'crt'), 'install': ('crt',), 'verify': ('report',), 'archive': ('output',), 'snapshot': ('output',)}
     for name in required[args.phase]:
         if getattr(args, name) is None:
             parser.error('--' + name.replace('_', '-') + ' is required for ' + args.phase)
     root = args.root.resolve()
-    if args.phase == 'prepare': prepare(args.source.resolve(), root, args.python_archive)
+    if args.phase == 'prepare': prepare(args.source.resolve(), root, args.python_archive, args.crt.resolve())
     elif args.phase == 'install': install(root, args.crt.resolve())
     elif args.phase == 'verify': verify(root, args.report.resolve())
     elif args.phase == 'snapshot': snapshot(root, args.output.resolve())
