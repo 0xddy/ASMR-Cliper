@@ -8,6 +8,12 @@
 #include <vector>
 
 namespace {
+LRESULT CALLBACK PaintControlProc(HWND window,UINT message,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR) {
+    // Owner drawing fills the whole control, including its rounded corners.
+    if(message==WM_ERASEBKGND)return 1;
+    if(message==WM_NCDESTROY)RemoveWindowSubclass(window,PaintControlProc,id);
+    return DefSubclassProc(window,message,wp,lp);
+}
 struct ChoiceItem {
     std::wstring label;
     HFONT font;
@@ -42,7 +48,8 @@ LRESULT CALLBACK ControlProc(HWND window,UINT message,WPARAM wp,LPARAM lp,UINT_P
         if(message==BM_GETCHECK)return state->checked?BST_CHECKED:BST_UNCHECKED;
         if(message==BM_SETCHECK) {state->checked=wp==BST_CHECKED;FinishAnimation(window,state);InvalidateRect(window,nullptr,FALSE);return 0;}
         if(message==WM_TIMER&&wp==AnimationTimer) {Position(window,state);InvalidateRect(window,nullptr,FALSE);return 0;}
-        if((message==WM_SHOWWINDOW||message==WM_ENABLE)&&!wp) {
+        if(((message==WM_SHOWWINDOW||message==WM_ENABLE)&&!wp)||
+           (message==WM_WINDOWPOSCHANGED&&(reinterpret_cast<WINDOWPOS*>(lp)->flags&SWP_HIDEWINDOW))) {
             FinishAnimation(window,state);InvalidateRect(window,nullptr,FALSE);
         }
     } else {
@@ -77,6 +84,13 @@ void Attach(HWND window,bool toggle,bool animated=false) {
     if(!SetWindowSubclass(window,ControlProc,1,reinterpret_cast<DWORD_PTR>(state)))delete state;
 }
 }
+BufferedSurface::BufferedSurface(HDC target,const RECT& bounds):dc_(target) {
+    HDC memory=nullptr;
+    buffer_=BeginBufferedPaint(target,&bounds,BPBF_COMPATIBLEBITMAP,nullptr,&memory);
+    if(buffer_)dc_=memory;
+}
+BufferedSurface::~BufferedSurface() {if(buffer_)EndBufferedPaint(buffer_,TRUE);}
+void InitPaintControl(HWND window) {SetWindowSubclass(window,PaintControlProc,2,0);}
 void InitChoiceControl(HWND window) {Attach(window,false);}
 void InitToggleControl(HWND window,bool animated) {Attach(window,true,animated);}
 

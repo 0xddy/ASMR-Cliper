@@ -40,16 +40,16 @@ const EnvironmentRow* EnvironmentRepair(int id) {for(const auto& row:Environment
 }
 
 bool MainWindow::testing() const {
-    return options_.contains("snapshot")||options_.contains("self-test")||options_.contains("test-job")||options_.contains("test-action")||options_.contains("test-navigation")||options_.contains("test-controls")||options_.contains("test-switches")||options_.contains("test-autosave")||options_.contains("test-dropdowns")||options_.contains("test-progress")||options_.contains("test-menu");
+    return options_.contains("snapshot")||options_.contains("self-test")||options_.contains("test-job")||options_.contains("test-action")||options_.contains("test-navigation")||options_.contains("test-rendering")||options_.contains("test-controls")||options_.contains("test-switches")||options_.contains("test-autosave")||options_.contains("test-dropdowns")||options_.contains("test-progress")||options_.contains("test-menu");
 }
 
 void MainWindow::createControls() {
     auto add=[&](int id,int group,LPCWSTR cls,const std::wstring& name,DWORD style,DWORD ex=0) {
-        auto hwnd=CreateWindowExW(ex,cls,name.c_str(),WS_CHILD|style,0,0,0,0,window_,reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),instance_,nullptr);
+        auto hwnd=CreateWindowExW(ex,cls,name.c_str(),WS_CHILD|WS_CLIPSIBLINGS|style,0,0,0,0,window_,reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),instance_,nullptr);
         if(!hwnd) throw std::runtime_error("Cannot create GUI control.");
         controls_[id]=hwnd;groups_[id]=group;return hwnd;
     };
-    auto button=[&](int id,int group,const wchar_t* label) {add(id,group,L"BUTTON",label,WS_TABSTOP|BS_OWNERDRAW);};
+    auto button=[&](int id,int group,const wchar_t* label) {InitPaintControl(add(id,group,L"BUTTON",label,WS_TABSTOP|BS_OWNERDRAW));};
     button(NavTask,-1,L"剪辑任务");button(NavHistory,-1,L"处理记录");button(NavEnvironment,-1,L"运行环境");button(NavSettings,-1,L"偏好设置");button(NavLogs,-1,L"运行日志");
     add(Input,0,L"EDIT",Wide(cfg_["input"]),WS_TABSTOP|ES_AUTOHSCROLL);
     add(Output,0,L"EDIT",Wide(cfg_["output_dir"]),WS_TABSTOP|ES_AUTOHSCROLL);
@@ -99,7 +99,7 @@ void MainWindow::createControls() {
     setFonts();populateSettings();updateHistory();enableControls(false);
     settingsReady_=true;
     SendMessageW(window_,WM_CHANGEUISTATE,MAKEWPARAM(UIS_SET,UISF_HIDEFOCUS),0);
-    appendLog(L"ASMR-Cliper 0.6.14");
+    appendLog(L"ASMR-Cliper 0.6.15");
     selectPage(page_);
 }
 
@@ -161,30 +161,27 @@ bool MainWindow::environmentReady() const {
     return true;
 }
 
-void MainWindow::updateVisibility() {
-    for(auto [id,hwnd]:controls_) {
-        int group=groups_[id];bool visible=group==-1||group==page_||(page_==3&&group==30+settingsTab_)||(page_==2&&group==20+environmentTab_);
-        if(id==Cancel||id==Progress)visible=busy_;
-        if(id>=Before&&id<=DenseGap)visible=visible&&strictExpanded_;
-        if(id==History||id==Play||id==Mapping||id==OpenOutput||id==ProgramMenu)visible=visible&&!history_.empty();
-        if(id==NewTask)visible=visible&&history_.empty();
-        if(id==ReviewFindings)visible=visible&&!history_.empty()&&lastResult_.value("speech_review",nlohmann::json::object()).value("status","")=="needs_review";
-        if(auto row=EnvironmentRepair(id)) {
-            auto found=components_.find(row->key);
-            visible=visible&&(found==components_.end()||found->second.value("status","")!="ready");
-        }
-        if(id==NetworkSettings)visible=visible&&environmentTab_==0;
-        if(id==Install)visible=visible&&(!environmentReady()||(busy_&&activeAction_=="install"));
-        ShowWindow(hwnd,visible?SW_SHOW:SW_HIDE);
+bool MainWindow::controlVisible(int id) const {
+    int group=groups_.at(id);bool visible=group==-1||group==page_||(page_==3&&group==30+settingsTab_)||(page_==2&&group==20+environmentTab_);
+    if(id==Cancel||id==Progress)visible=busy_;
+    if(id>=Before&&id<=DenseGap)visible=visible&&strictExpanded_;
+    if(id==History||id==Play||id==Mapping||id==OpenOutput||id==ProgramMenu)visible=visible&&!history_.empty();
+    if(id==NewTask)visible=visible&&history_.empty();
+    if(id==ReviewFindings)visible=visible&&!history_.empty()&&lastResult_.value("speech_review",nlohmann::json::object()).value("status","")=="needs_review";
+    if(auto row=EnvironmentRepair(id)) {
+        auto found=components_.find(row->key);
+        visible=visible&&(found==components_.end()||found->second.value("status","")!="ready");
     }
+    if(id==NetworkSettings)visible=visible&&environmentTab_==0;
+    if(id==Install)visible=visible&&(!environmentReady()||(busy_&&activeAction_=="install"));
+    return visible;
 }
 
 void MainWindow::selectPage(int page,int tab) {
     if(settingsReady_&&(page!=page_||(tab>=0&&tab!=settingsTab_)))flushPendingSettings();
     page_=std::clamp(page,0,4);if(tab>=0) settingsTab_=std::clamp(tab,0,2);
-    updateVisibility();
-    if(!testing())SetFocus(control(NavTask+page_));
     layout();
+    if(!testing())SetFocus(control(NavTask+page_));
     for(int id:{NavTask,NavHistory,NavEnvironment,NavSettings,NavLogs,SettingsAudio,SettingsRecognition,SettingsNetwork,EnvironmentBase,EnvironmentModels})InvalidateRect(control(id),nullptr,FALSE);
 }
 
@@ -199,13 +196,14 @@ void MainWindow::showChoices(int id) {
 void MainWindow::layout() {
     RECT rect{};GetClientRect(window_,&rect);int w=MulDiv(rect.right,96,dpi_),h=MulDiv(rect.bottom,96,dpi_);
     const int x=224,r=page_==3?std::min(w-32,x+1040):w-32,cw=r-x,third=(cw-32)/3;
-    auto place=[&](int id,int a,int b,int width,int height) {MoveWindow(control(id),d(a),d(b),d(std::max(width,1)),d(std::max(height,1)),TRUE);};
+    std::map<int,RECT> positions;
+    auto place=[&](int id,int a,int b,int width,int height) {positions[id]={d(a),d(b),d(a)+d(std::max(width,1)),d(b)+d(std::max(height,1))};};
     HDC dc=GetDC(window_);auto oldFont=SelectObject(dc,font_);TEXTMETRICW metrics{};GetTextMetricsW(dc,&metrics);SelectObject(dc,oldFont);ReleaseDC(window_,dc);
     auto field=[&](int id,int a,int b,int width) {
         RECT frame{d(a),d(b),d(a+width),d(b+40)};inputFrames_[id]=frame;
         int top=frame.top+(frame.bottom-frame.top-metrics.tmHeight)/2;
-        MoveWindow(control(id),frame.left+d(12),top,frame.right-frame.left-d(24),metrics.tmHeight,TRUE);
-        SendMessageW(control(id),EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(0,0));
+        positions[id]={frame.left+d(12),top,frame.right-d(12),top+metrics.tmHeight};
+        if(SendMessageW(control(id),EM_GETMARGINS,0,0)!=0)SendMessageW(control(id),EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(0,0));
     };
     for(int i=0;i<5;++i)place(NavTask+i,16,112+52*i,168,44);
     field(Input,x+24,142,cw-184);place(BrowseInput,r-144,142,120,40);
@@ -218,7 +216,7 @@ void MainWindow::layout() {
     place(Play,x+24,h-176,100,40);place(Mapping,x+136,h-176,112,40);place(OpenOutput,x+260,h-176,124,40);
     place(ReviewFindings,x+396,h-176,136,40);
     place(ProgramMenu,x+544,h-176,136,40);
-    bool install=GetWindowLongPtrW(control(Install),GWL_STYLE)&WS_VISIBLE;
+    bool install=controlVisible(Install);
     place(Doctor,r-(install?240:112),28,112,40);place(Install,r-116,28,116,40);place(NetworkSettings,r-124,186,100,36);
     place(EnvironmentModels,x+4,98,126,36);place(EnvironmentBase,x+134,98,126,36);
     place(ModelSettings,r-124,98,124,36);
@@ -248,7 +246,33 @@ void MainWindow::layout() {
     place(Reset,r-148,28,148,40);
     place(OpenLogs,r-224,28,112,40);place(ClearLog,r-100,28,100,40);place(Log,x+20,116,cw-40,h-228);
     place(Cancel,r-100,h-58,100,36);place(Progress,x,h-7,cw,3);
-    InvalidateRect(window_,nullptr,TRUE);
+    struct Placement {HWND hwnd;RECT bounds;UINT flags;bool visible;};
+    std::vector<Placement> changes;
+    for(auto [id,hwnd]:controls_) {
+        RECT old{};GetWindowRect(hwnd,&old);MapWindowPoints(nullptr,window_,reinterpret_cast<POINT*>(&old),2);
+        RECT next=positions.contains(id)?positions.at(id):old;
+        bool visible=controlVisible(id),shown=(GetWindowLongPtrW(hwnd,GWL_STYLE)&WS_VISIBLE)!=0;
+        if(EqualRect(&old,&next)&&visible==shown)continue;
+        UINT flags=SWP_NOZORDER|SWP_NOOWNERZORDER|SWP_NOACTIVATE|SWP_NOREDRAW|SWP_NOCOPYBITS;
+        if(visible!=shown)flags|=visible?SWP_SHOWWINDOW:SWP_HIDEWINDOW;
+        changes.push_back({hwnd,next,flags,visible});
+    }
+    if(!changes.empty()) {
+        HDWP batch=BeginDeferWindowPos(static_cast<int>(changes.size()));
+        for(const auto& change:changes) {
+            if(!batch)break;
+            const auto& b=change.bounds;
+            batch=DeferWindowPos(batch,change.hwnd,nullptr,b.left,b.top,b.right-b.left,b.bottom-b.top,change.flags);
+        }
+        bool applied=batch&&EndDeferWindowPos(batch);
+        if(!applied)for(const auto& change:changes) {
+            const auto& b=change.bounds;
+            SetWindowPos(change.hwnd,nullptr,b.left,b.top,b.right-b.left,b.bottom-b.top,change.flags);
+        }
+        for(const auto& change:changes)if(change.visible)
+            RedrawWindow(change.hwnd,nullptr,nullptr,RDW_INVALIDATE|RDW_FRAME|RDW_ERASE);
+    }
+    InvalidateRect(window_,nullptr,FALSE);
 }
 
 HWND MainWindow::inputAt(POINT point) const {
@@ -269,7 +293,7 @@ void MainWindow::paint(HDC dc) {
     auto line=[&](int a,int y,int right) {auto pen=CreatePen(PS_SOLID,1,Line);auto old=SelectObject(dc,pen);MoveToEx(dc,d(a),d(y),nullptr);LineTo(dc,d(right),d(y));SelectObject(dc,old);DeleteObject(pen);};
     RECT side{0,0,d(200),b.bottom};FillRect(dc,&side,white_);
     auto icon=LoadIconW(instance_,MAKEINTRESOURCEW(101));if(icon)DrawIconEx(dc,d(22),d(32),icon,d(24),d(24),0,nullptr,DI_NORMAL);
-    label(L"ASMR-Cliper",54,28,142,32,brandFont_);label(L"v0.6.14",24,h-43,140,20,smallFont_,Muted);
+    label(L"ASMR-Cliper",54,28,142,32,brandFont_);label(L"v0.6.15",24,h-43,140,20,smallFont_,Muted);
     const wchar_t* titles[]={L"剪辑任务",L"处理记录",L"运行环境",L"偏好设置",L"运行日志"};label(titles[page_],x,24,cw-260,42,titleFont_);
     if(page_==0) {
         card(96,374);label(L"音频 / 视频文件",x+24,110,cw-48,24,font_);label(L"输出目录",x+24,194,cw-48,24,font_);
@@ -370,6 +394,16 @@ void MainWindow::paint(HDC dc) {
 }
 
 void MainWindow::drawButton(const DRAWITEMSTRUCT* item) {
+    // Switches already buffer their antialiased animation independently.
+    int id=static_cast<int>(item->CtlID);
+    if(id==Audit||id==ProxyEnabled||id==MenuEnabled||id==FadeEnabled||id==EdgeFadeEnabled) {
+        DrawSwitchControl(item,id==Audit||id==MenuEnabled?boldFont_:font_,dpi_);return;
+    }
+    BufferedSurface surface(item->hDC,item->rcItem);
+    auto buffered=*item;buffered.hDC=surface.dc();drawButtonContent(&buffered);
+}
+
+void MainWindow::drawButtonContent(const DRAWITEMSTRUCT* item) {
     int id=static_cast<int>(item->CtlID);RECT r=item->rcItem;bool focus=(item->itemState&ODS_FOCUS)!=0,disabled=(item->itemState&ODS_DISABLED)!=0;
     SetBkMode(item->hDC,TRANSPARENT);
     if(id==History) {
@@ -400,8 +434,6 @@ void MainWindow::drawButton(const DRAWITEMSTRUCT* item) {
         if(checked){auto pen=CreatePen(PS_SOLID,d(2),White);auto old=SelectObject(item->hDC,pen);MoveToEx(item->hDC,box.left+d(5),y,nullptr);LineTo(item->hDC,box.left+d(9),y+d(4));LineTo(item->hDC,box.right-d(4),y-d(4));SelectObject(item->hDC,old);DeleteObject(pen);}
         r.left+=d(36);SelectObject(item->hDC,font_);SetTextColor(item->hDC,disabled?Muted:Ink);auto title=value(id);DrawTextW(item->hDC,title.c_str(),-1,&r,DT_LEFT|DT_VCENTER|DT_SINGLELINE);return;
     }
-    bool toggle=id==Audit||id==ProxyEnabled||id==MenuEnabled||id==FadeEnabled||id==EdgeFadeEnabled;
-    if(toggle) {DrawSwitchControl(item,id==Audit||id==MenuEnabled?boldFont_:font_,dpi_);return;}
     bool nav=id>=NavTask&&id<=NavLogs,tabs=id==SettingsAudio||id==SettingsRecognition||id==SettingsNetwork||id==EnvironmentBase||id==EnvironmentModels,mode=id==Strict||id==Relaxed||id==Extract,choice=id==Language||id==Device||id==SpeechChoice||id==ReviewChoice||id==OutputKind||id==AudioEncoding;
     bool selected=(id==Strict&&cfg_.value("mode","relaxed")=="strict")||(id==Relaxed&&cfg_.value("mode","relaxed")=="relaxed")||(id==Extract&&cfg_.value("mode","")=="extract")||(nav&&id-NavTask==page_)||(id==SettingsAudio&&settingsTab_==0)||(id==SettingsRecognition&&settingsTab_==1)||(id==SettingsNetwork&&settingsTab_==2)||(id==EnvironmentModels&&environmentTab_==1)||(id==EnvironmentBase&&environmentTab_==0);
     bool onCard=nav||tabs||choice||id==BrowseInput||id==BrowseOutput||id==Play||id==Mapping||id==OpenOutput||id==ReviewFindings||id==ProgramMenu||id==MenuModels||id==StrictDetails||id==NetworkSettings||id==TestProxy||EnvironmentRepair(id);
@@ -453,7 +485,7 @@ void MainWindow::enableControls(bool busy) {
     EnableWindow(control(EdgeFadeEnabled),!busy);EnableWindow(control(EdgeFadeSeconds),!busy&&SendMessageW(control(EdgeFadeEnabled),BM_GETCHECK,0,0)==BST_CHECKED);
     EnableWindow(control(FadeEnabled),!busy);EnableWindow(control(FadeSeconds),!busy&&SendMessageW(control(FadeEnabled),BM_GETCHECK,0,0)==BST_CHECKED);
     EnableWindow(control(ProxyUrl),!busy&&SendMessageW(control(ProxyEnabled),BM_GETCHECK,0,0)==BST_CHECKED);
-    updateVisibility();layout();refreshMode();
+    layout();refreshMode();
 }
 
 void MainWindow::updateHistory() {
@@ -461,7 +493,7 @@ void MainWindow::updateHistory() {
     for(const auto& row:history_) {auto name=Wide(row.value("output",""));SendMessageW(control(History),LB_ADDSTRING,0,reinterpret_cast<LPARAM>(name.c_str()));}
     SendMessageW(control(History),LB_SETITEMHEIGHT,0,d(76));
     if(!history_.empty()) {SendMessageW(control(History),LB_SETCURSEL,0,0);selectHistory();}
-    updateVisibility();
+    layout();
 }
 
 void MainWindow::selectHistory() {

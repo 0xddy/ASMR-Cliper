@@ -5,6 +5,63 @@
 #include <commctrl.h>
 #include <algorithm>
 
+void MainWindow::testRendering() {
+    nlohmann::json checks=nlohmann::json::array();
+    auto check=[&](const char* name,bool passed){checks.push_back({{"name",name},{"passed",passed}});};
+    SetWindowPos(window_,nullptr,-32000,-32000,d(1140),d(820),SWP_NOZORDER|SWP_NOACTIVATE);
+    ShowWindow(window_,SW_SHOWNOACTIVATE);selectPage(3,0);
+    activeAction_="run";beginTiming();enableControls(true);
+    auto clean=[&] {RedrawWindow(window_,nullptr,nullptr,RDW_VALIDATE|RDW_NOERASE|RDW_ALLCHILDREN);};
+    RECT client{},dirty{};GetClientRect(window_,&client);
+    clean();
+    for(int n=0;n<100;++n)receive(nlohmann::json{{"type","task_progress"},{"task_progress",{
+        {"stage",5},{"stages",7},{"title","成片复核"},{"round",2},{"round_limit",3},{"percent",n},{"detail","窗口进度"}}}}.dump());
+    check("progress burst invalidates only task footer",GetUpdateRect(window_,&dirty,FALSE)&&dirty.top>=client.bottom-d(80)&&dirty.left>=d(200));
+    check("progress leaves settings and navigation clean",!GetUpdateRect(control(Silence),nullptr,FALSE)&&!GetUpdateRect(control(NavSettings),nullptr,FALSE));
+    clean();receive(R"({"type":"log","message":"模型继续处理"})");
+    check("log-only event leaves page background clean",!GetUpdateRect(window_,nullptr,FALSE));
+    struct Counts {int positions=0,paints=0,shows=0,erases=0;} counts;
+    auto observer=[](HWND hwnd,UINT message,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR data)->LRESULT {
+        auto& count=*reinterpret_cast<Counts*>(data);
+        if(message==WM_WINDOWPOSCHANGED)++count.positions;
+        if(message==WM_PAINT)++count.paints;
+        if(message==WM_SHOWWINDOW)++count.shows;
+        if(message==WM_ERASEBKGND)++count.erases;
+        return DefSubclassProc(hwnd,message,wp,lp);
+    };
+    for(auto [id,hwnd]:controls_)SetWindowSubclass(hwnd,observer,99,reinterpret_cast<DWORD_PTR>(&counts));
+    clean();layout();layout();
+    check("unchanged layout does not move show or synchronously paint controls",counts.positions==0&&counts.paints==0&&counts.shows==0&&counts.erases==0);
+    counts={};const auto originalDpi=dpi_;dpi_=144;layout();
+    check("changed layout batches moves without intermediate control paints",counts.positions>0&&counts.paints==0&&counts.erases==0);
+    dpi_=originalDpi;layout();
+    counts={};SendMessageW(window_,WM_SIZE,SIZE_MINIMIZED,0);
+    check("minimizing never collapses child layout",counts.positions==0&&counts.paints==0);
+    for(auto [id,hwnd]:controls_)RemoveWindowSubclass(hwnd,observer,99);
+    stopTiming();enableControls(false);
+    HDC target=GetDC(window_),memory=CreateCompatibleDC(target);
+    auto bitmap=CreateCompatibleBitmap(target,160,96);auto oldBitmap=SelectObject(memory,bitmap);
+    RECT area{0,0,160,96},update{20,12,140,70};
+    auto sentinel=CreateSolidBrush(UiTheme::Accent);FillRect(memory,&area,sentinel);
+    {
+        BufferedSurface surface(memory,update);
+        check("painting uses a separate surface",surface.dc()!=memory);
+        FillRect(surface.dc(),&update,white_);
+        check("background clearing is not presented mid-frame",GetPixel(memory,40,30)==UiTheme::Accent);
+    }
+    check("completed buffer updates only its dirty rectangle",GetPixel(memory,40,30)==UiTheme::White&&GetPixel(memory,10,10)==UiTheme::Accent);
+    FillRect(memory,&area,sentinel);int saved=SaveDC(memory);IntersectClipRect(memory,30,18,100,60);
+    {BufferedSurface surface(memory,update);FillRect(surface.dc(),&update,white_);}
+    RestoreDC(memory,saved);
+    check("buffer presentation respects target child clipping",GetPixel(memory,40,30)==UiTheme::White&&GetPixel(memory,22,14)==UiTheme::Accent);
+    SelectObject(memory,oldBitmap);DeleteObject(bitmap);DeleteObject(sentinel);DeleteDC(memory);ReleaseDC(window_,target);
+    const auto folder=std::filesystem::path(Wide(options_["test-rendering"])).parent_path();
+    screenshot(folder/L"rendering-settings.png");
+    bool passed=std::all_of(checks.begin(),checks.end(),[](const auto& row){return row.at("passed").template get<bool>();});
+    WriteJson(folder/L"rendering-regression.json",{{"passed",passed},{"checks",checks}});
+    completed_=passed;finishTest(passed?0:1);
+}
+
 void MainWindow::testProgramMenu() {
     using json=nlohmann::json;
     json checks=json::array();
@@ -183,7 +240,7 @@ void MainWindow::testControls() {
     click(Reset);click(MenuModels);
     check("model manager shortcut returns to environment files",page_==2&&environmentTab_==1);
     click(EnvironmentBase);check("base environment remains separate",environmentTab_==0&&!visible(ModelSettings));
-    selectPage(3,0);click(Reset);strictExpanded_=false;updateVisibility();layout();
+    selectPage(3,0);click(Reset);strictExpanded_=false;layout();
     check("editing groups sounds pauses and fades",visible(KeepSoftLaugh)&&visible(KeepTapping)&&visible(Silence)&&visible(FadeEnabled)&&!visible(Language)&&!visible(Audit)&&!visible(ProxyUrl));
     check("strict parameters can be folded",!visible(Before)&&visible(StrictDetails));
     check("sound defaults preserved",checked(KeepSoftLaugh)&&checked(KeepHeartbeat)&&checked(KeepTapping)&&!checked(KeepLoudLaugh)&&!checked(KeepVaping)&&!checked(KeepDrinking)&&!checked(KeepImpacts));
@@ -349,7 +406,9 @@ void MainWindow::testSwitches() {
         pump(40);double middle=ToggleVisualPosition(control(FadeEnabled));
         check("thumb passes through intermediate positions",middle>0.&&middle<1.);
         screenshot(folder/L"switch-moving.png");
-        double before=ToggleVisualPosition(control(FadeEnabled));click(FadeEnabled);
+        // Test continuity at the reversal itself; synchronous settings I/O
+        // legitimately advances wall-clock animation before BM_CLICK returns.
+        double before=ToggleVisualPosition(control(FadeEnabled));ToggleChecked(control(FadeEnabled));
         check("rapid reversal starts at the current thumb position",std::abs(ToggleVisualPosition(control(FadeEnabled))-before)<.06&&SendMessageW(control(FadeEnabled),BM_GETCHECK,0,0)==BST_UNCHECKED);
         pump(35);check("reversed thumb travels toward off",ToggleVisualPosition(control(FadeEnabled))<before);
         pump(220);check("animation settles at exact off endpoint",ToggleVisualPosition(control(FadeEnabled))==0.);

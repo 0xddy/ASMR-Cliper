@@ -158,7 +158,13 @@ std::wstring MainWindow::value(int id) const {
     int length=GetWindowTextLengthW(control(id)); std::wstring result(static_cast<size_t>(length)+1,0);
     GetWindowTextW(control(id),result.data(),length+1); result.resize(length); return result;
 }
-void MainWindow::text(int id,const std::wstring& content) { SetWindowTextW(control(id),content.c_str()); }
+void MainWindow::text(int id,const std::wstring& content) { if(value(id)!=content)SetWindowTextW(control(id),content.c_str()); }
+
+void MainWindow::invalidateFooter() {
+    RECT footer{};GetClientRect(window_,&footer);
+    footer.left=d(200);footer.top=std::max(0L,footer.bottom-d(80));
+    InvalidateRect(window_,&footer,FALSE);
+}
 
 void MainWindow::beginTiming() {
     taskStarted_=GetTickCount64();taskElapsed_=0;timing_=true;hasTiming_=true;
@@ -209,7 +215,7 @@ void MainWindow::setFonts() {
     auto make=[&](int size,int weight) { return CreateFontW(-d(size),0,0,0,weight,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Microsoft YaHei UI"); };
     font_=make(15,FW_NORMAL);titleFont_=make(27,FW_BOLD);boldFont_=make(17,FW_BOLD);smallFont_=make(13,FW_NORMAL);
     brandFont_=make(18,FW_SEMIBOLD);
-    for(auto [id,handle]:controls_) { (void)id; SendMessageW(handle,WM_SETFONT,reinterpret_cast<WPARAM>(font_),TRUE); }
+    for(auto [id,handle]:controls_) { (void)id; SendMessageW(handle,WM_SETFONT,reinterpret_cast<WPARAM>(font_),FALSE); }
 }
 
 
@@ -501,6 +507,7 @@ void MainWindow::confirmLanguage(const json& data) {
 void MainWindow::receive(const std::string& line) {
     auto data=json::parse(line,nullptr,false);
     if(data.is_discarded()||!data.is_object()) {if(!line.empty())appendLog(Wide(line));return;}
+    const auto previousStatus=status_;
     ++eventCount_;auto type=data.value("type","");std::wstring msg=Wide(data.value("message",""));
     if(!msg.empty())appendLog(msg);
     if((activeAction_=="run"||activeAction_=="menu")&&data.contains("task_progress")&&timing_&&!completed_&&!cancelled_) {
@@ -558,8 +565,8 @@ void MainWindow::receive(const std::string& line) {
         else if(final&&(data.value("program_menu",json::object()).value("status","")=="unavailable"||data.value("program_menu",json::object()).value("status","")=="failed"))status_+=L" · 节目单未生成";
     }
     if(type=="error"){stopTiming();notice_=true;status_=std::wstring(mediaReady_||activeAction_=="menu"?L"成片已保留，节目单未生成：":L"处理失败：")+msg;if(activeAction_=="testproxy")proxyStatus_=msg;}
-    if(type=="component"||type=="environment"||type=="proxy_result"){updateVisibility();layout();}
-    InvalidateRect(window_,nullptr,FALSE);
+    if(((type=="component"||type=="environment")&&page_==2)||(type=="proxy_result"&&page_==3&&settingsTab_==2))layout();
+    if(status_!=previousStatus||data.contains("task_progress")||data.contains("progress")||type=="download"||type=="error")invalidateFooter();
 }
 
 void MainWindow::prompt() {
@@ -668,16 +675,22 @@ void MainWindow::finishTest(DWORD code) {
 LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
     switch(msg) {
     case WM_CREATE: dpi_=GetDpiForWindow(window_);createControls();layout();return 0;
-    case WM_SIZE: if(!controls_.empty()) layout();return 0;
+    case WM_SIZE: if(wp!=SIZE_MINIMIZED&&!controls_.empty()) layout();return 0;
     case WM_DPICHANGED: {
-        dpi_=HIWORD(wp);auto r=reinterpret_cast<RECT*>(lp);SetWindowPos(window_,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER|SWP_NOACTIVATE);setFonts();layout();return 0;
+        dpi_=HIWORD(wp);setFonts();auto r=reinterpret_cast<RECT*>(lp);
+        SetWindowPos(window_,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER|SWP_NOACTIVATE);
+        layout();RedrawWindow(window_,nullptr,nullptr,RDW_INVALIDATE|RDW_FRAME|RDW_ALLCHILDREN);return 0;
     }
     case WM_GETMINMAXINFO: {
         auto info=reinterpret_cast<MINMAXINFO*>(lp);info->ptMinTrackSize={d(1100),d(800)};return 0;
     }
     case WM_UPDATEUISTATE: wp=MAKEWPARAM(UIS_SET,UISF_HIDEFOCUS);break;
     case WM_ERASEBKGND: return 1;
-    case WM_PAINT: { PAINTSTRUCT ps{};HDC dc=BeginPaint(window_,&ps);paint(dc);EndPaint(window_,&ps);return 0; }
+    case WM_PAINT: {
+        PAINTSTRUCT ps{};HDC dc=BeginPaint(window_,&ps);
+        if(!IsRectEmpty(&ps.rcPaint)) {BufferedSurface surface(dc,ps.rcPaint);paint(surface.dc());}
+        EndPaint(window_,&ps);return 0;
+    }
     case WM_PRINTCLIENT: paint(reinterpret_cast<HDC>(wp));return 0;
     case WM_SETCURSOR:
         if(LOWORD(lp)==HTCLIENT) {
@@ -728,7 +741,7 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
         if(HIWORD(wp)!=BN_CLICKED) break;
         if(id>=NavTask&&id<=NavLogs) {selectPage(id-NavTask);return 0;}
         if(id==SettingsAudio||id==SettingsNetwork||id==SettingsRecognition) {selectPage(3,id==SettingsNetwork?2:id==SettingsRecognition?1:0);return 0;}
-        if(id==StrictDetails){strictExpanded_=!strictExpanded_;updateVisibility();layout();return 0;}
+        if(id==StrictDetails){strictExpanded_=!strictExpanded_;layout();return 0;}
         if(id==MenuModels){environmentTab_=1;selectPage(2);return 0;}
         if(id==ModelSettings){selectPage(3,1);return 0;}
         if(id==EnvironmentBase||id==EnvironmentModels) {
@@ -822,8 +835,7 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
     case WM_TIMER:
         if(wp==SettingsTimer){flushPendingSettings(false);return 0;}
         if(wp==20) {
-            RECT footer{};GetClientRect(window_,&footer);footer.top=std::max(0L,footer.bottom-d(80));
-            InvalidateRect(window_,&footer,FALSE);return 0;
+            invalidateFooter();return 0;
         }
         if(wp!=1)return 0;
         KillTimer(window_,1);
@@ -834,6 +846,7 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
         else if(options_.contains("test-switches")) testSwitches();
         else if(options_.contains("test-autosave")) testAutoSave();
         else if(options_.contains("test-navigation")) testNavigationRendering();
+        else if(options_.contains("test-rendering")) testRendering();
         else if(options_.contains("test-job")) start(false);
         else if(options_.contains("self-test")) start(true);
         else if(options_.contains("test-action")) environmentTask(options_["test-action"],options_.value("test-component","all"));

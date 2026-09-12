@@ -2,11 +2,13 @@
 #include <shellapi.h>
 #include <objidl.h>
 #include <gdiplus.h>
+#include <uxtheme.h>
 #include <fstream>
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const HRESULT bufferedPaint = BufferedPaintInit();
     Gdiplus::GdiplusStartupInput startup;
     ULONG_PTR gdiplus = 0;
     Gdiplus::GdiplusStartup(&gdiplus, &startup, nullptr);
@@ -32,6 +34,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         MessageBoxW(nullptr, Wide(e.what()).c_str(), L"ASMR-Cliper", MB_ICONERROR);
     }
     Gdiplus::GdiplusShutdown(gdiplus);
+    if (SUCCEEDED(bufferedPaint)) BufferedPaintUnInit();
     if (SUCCEEDED(com)) CoUninitialize();
     return result;
 }

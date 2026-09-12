@@ -1,5 +1,13 @@
 # 开发说明
 
+## 0.6.15 窗口重绘与闪烁修复
+
+主窗口 `WM_PAINT` 只为脏区域建立 `BufferedSurface`，完成背景、卡片与文字绘制后一次提交；普通按钮、下拉控件、模式卡和历史行也使用缓冲绘制。开关保留自己的抗锯齿缓冲。UI 线程统一初始化 / 释放 Windows buffered paint，目标 DC 的子窗口裁剪区域保持有效；自绘按钮跳过独立擦背景阶段。
+
+任务进度和耗时只刷新底部状态区，纯日志事件不触发页面背景重绘。环境状态仅在环境页刷新正文，隐藏页面进入时再应用最新状态。布局先计算控件位置与显示状态，再用 `DeferWindowPos` 批量提交，跳过未变化的控件，以 `SWP_NOREDRAW` 避免中途同步绘制，完成后统一使受影响区域失效。不再重复设置相同控件文字；DPI 更新先替换字体，完成布局后刷新，最小化不压缩子控件布局。通过位置批量隐藏的开关也会停止动画定时器。
+
+`gui_rendering` 用真实窗口消息和脏区验证连续 100 条进度只影响页脚、日志不刷整页、布局中没有同步子控件绘制、最小化不移动控件，以及缓冲提交前后像素和裁剪边界。导航、下拉、缩放、动画、自动保存与任务进度继续执行原有 GUI 回归。动画反向连续性在切换函数返回时验证，避免把同步保存设置所经过的正常动画时间误判为跳变。参考 [Windows buffered paint](https://learn.microsoft.com/en-us/windows/win32/api/uxtheme/nf-uxtheme-beginbufferedpaint) 和 [批量窗口定位](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-deferwindowpos)。
+
 ## 0.6.14 视频精确切割
 
 新增 `video_cut_mode=copy|precise`，默认 copy；GUI 的「视频（精确切割）」保存为 `output_kind=video` + `video_cut_mode=precise`，自动保存并回填。原包复制路径不变，无法保留完整 GOP 的错误提示指向精确切割选项。

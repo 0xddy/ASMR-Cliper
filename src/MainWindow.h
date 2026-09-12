@@ -38,6 +38,8 @@ private:
     void layout();
     void paint(HDC);
     void drawButton(const DRAWITEMSTRUCT*);
+    void drawButtonContent(const DRAWITEMSTRUCT*);
+    void invalidateFooter();
     void setFonts();
     void refreshMode();
     void enableControls(bool busy);
@@ -58,13 +60,14 @@ private:
     void programMenuTask();
     void storeResult();
     void selectPage(int page, int tab = -1);
-    void updateVisibility();
+    bool controlVisible(int id) const;
     void showChoices(int id);
     bool environmentReady() const;
     void populateSettings(int tab = -1);
     void updateHistory();
     void selectHistory();
     void testNavigationRendering();
+    void testRendering();
     void testControls();
     void testSwitches();
     void testAutoSave();
