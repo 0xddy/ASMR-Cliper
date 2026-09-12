@@ -13,7 +13,7 @@ from asmrclip.common import event, read_json, settings
 
 def main():
     parser=argparse.ArgumentParser(description='ASMRCLIP local editing engine')
-    parser.add_argument('command',choices=['run','doctor'])
+    parser.add_argument('command',choices=['run','doctor','menu'])
     parser.add_argument('--config',required=True,type=Path)
     args=parser.parse_args()
     try:
@@ -21,6 +21,9 @@ def main():
         from asmrclip.pipeline import run,doctor
         if args.command=='doctor':
             doctor(settings(data))
+        elif args.command=='menu':
+            from asmrclip.program_menu import run as menu
+            menu(data)
         else:
             run(data)
         return 0

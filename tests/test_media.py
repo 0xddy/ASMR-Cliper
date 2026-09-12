@@ -138,7 +138,7 @@ class MediaExportTests(unittest.TestCase):
         from asmrclip.pipeline import run
         source=self.source();meta,frames,base=self.plan(source);dt=1024/meta['sample_rate']
         cfg=settings({'input':str(source),'output_dir':str(self.folder/'out'),'cache_dir':str(self.folder/'pipeline-cache'),
-                      'mode':'extract','output_kind':'auto','review_enabled':True})
+                      'mode':'extract','output_kind':'auto','review_enabled':True,'generate_program_menu':True})
         recognizer=MagicMock();recognizer.scan.return_value={'spoken':[],'language':'en'}
         classifier=MagicMock();classifier.music_intervals.return_value=[]
         classifier.exclusions.return_value={key:[] for key in ('voice','soft_laugh','heartbeat','tapping','loud_laugh','airflow','drinking','impacts')}
@@ -150,6 +150,12 @@ class MediaExportTests(unittest.TestCase):
                         'findings':[{'start':.2,'end':.4,'text':'hello'}] if self.calls==1 else []}
             def close(self):pass
         reviewer=ReviewerStub();spoken=[]
+        def annotate(path,report,cfg):
+            self.assertTrue(Path(path).is_file())
+            self.assertTrue(report['decode_verified'])
+            self.assertEqual(reviewer.calls,2)
+            report['program_menu']={'status':'ready','chapters':[]}
+            return report['program_menu']
         def make_plan(meta,frames,speech,*args):
             spoken.append(list(speech['spoken']))
             return {**base,'frame_seconds':dt,'duration':sum(b-a for a,b in base['keep_frames'])*dt}
@@ -159,7 +165,8 @@ class MediaExportTests(unittest.TestCase):
              patch('asmrclip.planner.make_plan',side_effect=make_plan),\
              patch('asmrclip.media.video_groups',wraps=video_groups) as indexing,\
              patch('asmrclip.media.copy_media_packets',wraps=copy_media_packets) as copying,\
-             patch('asmrclip.exporter.validate_decode',wraps=validate_decode) as validation:
+             patch('asmrclip.exporter.validate_decode',wraps=validate_decode) as validation,\
+             patch('asmrclip.program_menu.attach',side_effect=annotate) as annotation:
             result=run(cfg)
         self.assertTrue(result['output'].endswith('.mp4'));self.assertEqual(result['speech_review']['status'],'passed')
         self.assertEqual(reviewer.calls,2);self.assertEqual(len(list((self.folder/'out').iterdir())),1)
@@ -167,6 +174,8 @@ class MediaExportTests(unittest.TestCase):
         self.assertEqual([c.args[5]['kind'] for c in copying.call_args_list],['audio','audio','video'])
         self.assertEqual(indexing.call_count,1)
         self.assertEqual(validation.call_count,1)
+        annotation.assert_called_once()
+        self.assertEqual(result['program_menu']['status'],'ready')
 
 
 if __name__=='__main__':unittest.main()

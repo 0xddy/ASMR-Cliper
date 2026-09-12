@@ -12,6 +12,7 @@
   "silence_seconds": 7,
   "audit": false,
   "review_enabled": true,
+  "generate_program_menu": true,
   "review_model": "models/whisper-review",
   "review_max_passes": 3,
   "keep_soft_laugh": true,

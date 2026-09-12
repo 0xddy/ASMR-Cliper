@@ -40,7 +40,7 @@ const EnvironmentRow* EnvironmentRepair(int id) {for(const auto& row:Environment
 }
 
 bool MainWindow::testing() const {
-    return options_.contains("snapshot")||options_.contains("self-test")||options_.contains("test-job")||options_.contains("test-action")||options_.contains("test-navigation")||options_.contains("test-controls")||options_.contains("test-dropdowns")||options_.contains("test-progress");
+    return options_.contains("snapshot")||options_.contains("self-test")||options_.contains("test-job")||options_.contains("test-action")||options_.contains("test-navigation")||options_.contains("test-controls")||options_.contains("test-dropdowns")||options_.contains("test-progress")||options_.contains("test-menu");
 }
 
 void MainWindow::createControls() {
@@ -62,6 +62,7 @@ void MainWindow::createControls() {
     add(History,1,L"LISTBOX",L"",WS_TABSTOP|WS_VSCROLL|LBS_OWNERDRAWFIXED|LBS_HASSTRINGS|LBS_NOTIFY|LBS_NOINTEGRALHEIGHT);
     button(NewTask,1,L"新建剪辑");button(Play,1,L"播放");button(Mapping,1,L"时间对照");button(OpenOutput,1,L"结果目录");
     button(ReviewFindings,1,L"待复听位置");
+    button(ProgramMenu,1,L"生成节目单");
     button(Doctor,2,L"检测环境");button(Install,2,L"补齐环境");button(NetworkSettings,2,L"代理设置");
     for(const auto& row:EnvironmentRows)if(row.repair)button(row.repair,20+row.tab,L"下载 / 修复");
     button(EnvironmentModels,2,L"模型选择");button(EnvironmentBase,2,L"基础环境");
@@ -70,6 +71,8 @@ void MainWindow::createControls() {
     for(auto label:{L"Whisper large-v3",L"Qwen3-ASR-1.7B",L"Whisper large-v3-turbo"})SendMessageW(control(SpeechChoice),CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label));
     for(auto label:{L"Whisper large-v3",L"Qwen3-ASR-1.7B"})SendMessageW(control(ReviewChoice),CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label));
     button(SettingsAudio,3,L"剪辑参数");button(SettingsSounds,3,L"保留声音");button(SettingsNetwork,3,L"网络代理");button(Save,3,L"保存设置");button(Reset,3,L"恢复默认");
+    button(SettingsMenu,3,L"成片节目单");button(MenuEnabled,33,L"剪辑完成后自动识别节目单");InitToggleControl(control(MenuEnabled));
+    button(MenuModels,33,L"声音模型设置");
     const wchar_t* sounds[]={L"轻笑",L"心跳",L"ASMR 道具敲击",L"大笑",L"呼气/烟雾",L"喝水休息",L"物品掉落 / 突兀撞击"};
     int soundIndex=0;
     for(auto [id,key]:SoundOptions){button(id,32,sounds[soundIndex++]);InitToggleControl(control(id));}
@@ -88,7 +91,7 @@ void MainWindow::createControls() {
     add(Progress,-1,PROGRESS_CLASSW,L"",PBS_SMOOTH);SendMessageW(control(Progress),PBM_SETRANGE32,0,1000);SetWindowTheme(control(Progress),L"",L"");SendMessageW(control(Progress),PBM_SETBARCOLOR,0,Accent);SendMessageW(control(Progress),PBM_SETBKCOLOR,0,White);
     setFonts();populateSettings();updateHistory();enableControls(false);
     SendMessageW(window_,WM_CHANGEUISTATE,MAKEWPARAM(UIS_SET,UISF_HIDEFOCUS),0);
-    appendLog(L"ASMR-Cliper 0.6.4");
+    appendLog(L"ASMR-Cliper 0.6.5");
     selectPage(page_);
 }
 
@@ -114,6 +117,7 @@ void MainWindow::populateSettings(int tab) {
     }
     if(tab<0||tab==2) for(auto [id,key]:SoundOptions)
         SendMessageW(control(id),BM_SETCHECK,cfg_.value(key,id==KeepSoftLaugh||id==KeepHeartbeat||id==KeepTapping)?BST_CHECKED:BST_UNCHECKED,0);
+    if(tab<0||tab==3)SendMessageW(control(MenuEnabled),BM_SETCHECK,cfg_.value("generate_program_menu",true)?BST_CHECKED:BST_UNCHECKED,0);
     refreshMode();
 }
 
@@ -138,7 +142,7 @@ void MainWindow::updateVisibility() {
     for(auto [id,hwnd]:controls_) {
         int group=groups_[id];bool visible=group==-1||group==page_||(page_==3&&group==30+settingsTab_)||(page_==2&&group==20+environmentTab_);
         if(id==Cancel||id==Progress)visible=busy_;
-        if(id==History||id==Play||id==Mapping||id==OpenOutput)visible=visible&&!history_.empty();
+        if(id==History||id==Play||id==Mapping||id==OpenOutput||id==ProgramMenu)visible=visible&&!history_.empty();
         if(id==NewTask)visible=visible&&history_.empty();
         if(id==ReviewFindings)visible=visible&&!history_.empty()&&lastResult_.value("speech_review",nlohmann::json::object()).value("status","")=="needs_review";
         if(auto row=EnvironmentRepair(id)) {
@@ -152,11 +156,11 @@ void MainWindow::updateVisibility() {
 }
 
 void MainWindow::selectPage(int page,int tab) {
-    page_=std::clamp(page,0,4);if(tab>=0) settingsTab_=std::clamp(tab,0,2);
+    page_=std::clamp(page,0,4);if(tab>=0) settingsTab_=std::clamp(tab,0,3);
     updateVisibility();
     if(!testing())SetFocus(control(NavTask+page_));
     layout();
-    for(int id:{NavTask,NavHistory,NavEnvironment,NavSettings,NavLogs,SettingsAudio,SettingsNetwork,SettingsSounds,EnvironmentBase,EnvironmentModels})InvalidateRect(control(id),nullptr,FALSE);
+    for(int id:{NavTask,NavHistory,NavEnvironment,NavSettings,NavLogs,SettingsAudio,SettingsNetwork,SettingsSounds,SettingsMenu,EnvironmentBase,EnvironmentModels})InvalidateRect(control(id),nullptr,FALSE);
 }
 
 void MainWindow::showChoices(int id) {
@@ -184,6 +188,7 @@ void MainWindow::layout() {
     place(History,x+16,112,cw-32,h-315);
     place(Play,x+24,h-176,100,40);place(Mapping,x+136,h-176,112,40);place(OpenOutput,x+260,h-176,124,40);
     place(ReviewFindings,x+396,h-176,136,40);
+    place(ProgramMenu,x+544,h-176,136,40);
     bool install=GetWindowLongPtrW(control(Install),GWL_STYLE)&WS_VISIBLE;
     place(Doctor,r-(install?240:112),28,112,40);place(Install,r-116,28,116,40);place(NetworkSettings,r-124,186,100,36);
     place(EnvironmentModels,x+4,98,126,36);place(EnvironmentBase,x+134,98,126,36);
@@ -194,13 +199,14 @@ void MainWindow::layout() {
         ++rowIndex;
     }
     place(SettingsAudio,x+4,98,126,36);place(SettingsSounds,x+134,98,126,36);place(SettingsNetwork,x+264,98,126,36);
+    place(SettingsMenu,x+394,98,126,36);place(MenuEnabled,x+24,184,cw-48,40);place(MenuModels,x+24,322,136,38);
     int soundRow=0;for(auto [id,key]:SoundOptions)place(id,x+24,242+soundRow++*44,cw-48,40);
     place(Language,x+24,240,col,40);place(Device,x+40+col,240,col,40);
     field(Silence,x+24,324,col);field(SilenceDb,x+40+col,324,col);place(Audit,x+24,384,cw-48,32);
     int cell=(cw-96)/4;
     for(int i=0;i<4;++i)field(Before+i,x+24+i*(cell+16),536,cell);
     place(ProxyEnabled,x+24,184,cw-48,40);field(ProxyUrl,x+24,268,cw-184);place(TestProxy,r-144,268,120,40);
-    int actionY=settingsTab_==0?624:settingsTab_==2?586:proxyTested_?564:356;
+    int actionY=settingsTab_==0?624:settingsTab_==2?586:settingsTab_==3?408:proxyTested_?564:356;
     place(Save,x,actionY,124,40);place(Reset,x+136,actionY,112,40);
     place(OpenLogs,r-224,28,112,40);place(ClearLog,r-100,28,100,40);place(Log,x+20,116,cw-40,h-228);
     place(Cancel,r-100,h-58,100,36);place(Progress,x,h-7,cw,3);
@@ -225,7 +231,7 @@ void MainWindow::paint(HDC dc) {
     auto line=[&](int a,int y,int right) {auto pen=CreatePen(PS_SOLID,1,Line);auto old=SelectObject(dc,pen);MoveToEx(dc,d(a),d(y),nullptr);LineTo(dc,d(right),d(y));SelectObject(dc,old);DeleteObject(pen);};
     RECT side{0,0,d(200),b.bottom};FillRect(dc,&side,white_);
     auto icon=LoadIconW(instance_,MAKEINTRESOURCEW(101));if(icon)DrawIconEx(dc,d(22),d(32),icon,d(24),d(24),0,nullptr,DI_NORMAL);
-    label(L"ASMR-Cliper",54,28,142,32,brandFont_);label(L"v0.6.4",24,h-43,140,20,smallFont_,Muted);
+    label(L"ASMR-Cliper",54,28,142,32,brandFont_);label(L"v0.6.5",24,h-43,140,20,smallFont_,Muted);
     const wchar_t* titles[]={L"剪辑任务",L"处理记录",L"运行环境",L"偏好设置",L"运行日志"};label(titles[page_],x,24,cw-260,42,titleFont_);
     if(page_==0) {
         card(96,374);label(L"音频 / 视频文件",x+24,110,cw-48,24,font_);label(L"输出目录",x+24,194,cw-48,24,font_);
@@ -265,7 +271,7 @@ void MainWindow::paint(HDC dc) {
             if(index<geometry.count)line(x+24,geometry.rowTop(index),r-24);
         }
     } else if(page_==3) {
-        Rounded(dc,{d(x),d(94),d(x+394),d(138)},White,Line,d(14));
+        Rounded(dc,{d(x),d(94),d(x+524),d(138)},White,Line,d(14));
         if(settingsTab_==0) {
             int col=(cw-64)/2;card(164,436);label(L"分析参数",x+24,176,cw-48,28,boldFont_);
             label(L"语音语言",x+24,211,col,22,smallFont_,Muted);label(L"计算设备",x+40+col,211,col,22,smallFont_,Muted);
@@ -283,9 +289,13 @@ void MainWindow::paint(HDC dc) {
                     label(ok?std::to_wstring(result.value("milliseconds",0))+L" ms":L"连接失败",r-184,y,160,26,smallFont_,ok?Accent:RGB(178,72,61),DT_RIGHT|DT_VCENTER|DT_SINGLELINE);
                 }
             }
-        } else {
+        } else if(settingsTab_==2) {
             card(164,562);label(L"选择要保留的声音",x+24,176,cw-48,28,boldFont_);
             label(L"勾选表示允许保留 · 说话声始终删除 · V4 仍需 ASMR 证据",x+24,210,cw-48,22,smallFont_,Muted);
+        } else {
+            card(164,384);
+            label(L"分析实际成片，按声音出现顺序生成带时间的节目单。",x+24,242,cw-48,26,font_);
+            label(L"本地 CLAP 声音语义模型 · 不确定项目标为待确认",x+24,278,cw-48,22,smallFont_,Muted);
         }
     } else card(96,h-92);
     for(const auto& [id,frame]:inputFrames_) if(GetWindowLongPtrW(control(id),GWL_STYLE)&WS_VISIBLE)Rounded(dc,frame,IsWindowEnabled(control(id))?White:Bg,Line,d(12));
@@ -293,7 +303,7 @@ void MainWindow::paint(HDC dc) {
         RECT footer{d(200),d(h-80),b.right,b.bottom};FillRect(dc,&footer,white_);line(200,h-80,w);
         label(status_,x,h-70,cw-124,28,font_);
         std::wstring detail=downloadStatus_;
-        if(activeAction_=="run"&&!taskProgress_.empty()) {
+        if((activeAction_=="run"||activeAction_=="menu")&&!taskProgress_.empty()) {
             detail=Wide(taskProgress_.value("detail",""));
             if(taskProgress_.value("percent",nlohmann::json()).is_number()) {
                 detail+=L"   ·   "+std::wstring(taskProgress_.value("round",0)>0?L"本轮 ":L"本阶段 ")+std::to_wstring(static_cast<int>(taskProgress_["percent"].get<double>()))+L"%";
@@ -331,7 +341,7 @@ void MainWindow::drawButton(const DRAWITEMSTRUCT* item) {
         if(checked){auto pen=CreatePen(PS_SOLID,d(2),White);auto old=SelectObject(item->hDC,pen);MoveToEx(item->hDC,box.left+d(5),y,nullptr);LineTo(item->hDC,box.left+d(9),y+d(4));LineTo(item->hDC,box.right-d(4),y-d(4));SelectObject(item->hDC,old);DeleteObject(pen);}
         r.left+=d(36);SelectObject(item->hDC,font_);SetTextColor(item->hDC,disabled?Muted:Ink);auto title=value(id);DrawTextW(item->hDC,title.c_str(),-1,&r,DT_LEFT|DT_VCENTER|DT_SINGLELINE);return;
     }
-    bool toggle=id==Audit||id==ProxyEnabled;
+    bool toggle=id==Audit||id==ProxyEnabled||id==MenuEnabled;
     if(toggle) {
         auto brush=CreateSolidBrush(focus&&!disabled?Bg:White);FillRect(item->hDC,&r,brush);DeleteObject(brush);
         RECT label=r;label.right-=d(64);SelectObject(item->hDC,font_);SetTextColor(item->hDC,disabled?Muted:Ink);auto title=value(id);DrawTextW(item->hDC,title.c_str(),-1,&label,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
@@ -340,9 +350,9 @@ void MainWindow::drawButton(const DRAWITEMSTRUCT* item) {
         auto color=checked&&!disabled?Accent:RGB(210,220,218);Rounded(item->hDC,track,color,color,d(24));
         RECT dot{checked?track.right-d(22):track.left+d(2),track.top+d(2),checked?track.right-d(2):track.left+d(22),track.top+d(22)};Rounded(item->hDC,dot,White,White,d(20));return;
     }
-    bool nav=id>=NavTask&&id<=NavLogs,tabs=id==SettingsAudio||id==SettingsNetwork||id==SettingsSounds||id==EnvironmentBase||id==EnvironmentModels,mode=id==Strict||id==Relaxed||id==Extract,choice=id==Language||id==Device||id==SpeechChoice||id==ReviewChoice||id==OutputKind;
-    bool selected=(id==Strict&&cfg_.value("mode","relaxed")=="strict")||(id==Relaxed&&cfg_.value("mode","relaxed")=="relaxed")||(id==Extract&&cfg_.value("mode","")=="extract")||(nav&&id-NavTask==page_)||(id==SettingsAudio&&settingsTab_==0)||(id==SettingsNetwork&&settingsTab_==1)||(id==SettingsSounds&&settingsTab_==2)||(id==EnvironmentModels&&environmentTab_==1)||(id==EnvironmentBase&&environmentTab_==0);
-    bool onCard=nav||tabs||choice||id==BrowseInput||id==BrowseOutput||id==Play||id==Mapping||id==OpenOutput||id==ReviewFindings||id==NetworkSettings||id==TestProxy||EnvironmentRepair(id);
+    bool nav=id>=NavTask&&id<=NavLogs,tabs=id==SettingsAudio||id==SettingsNetwork||id==SettingsSounds||id==SettingsMenu||id==EnvironmentBase||id==EnvironmentModels,mode=id==Strict||id==Relaxed||id==Extract,choice=id==Language||id==Device||id==SpeechChoice||id==ReviewChoice||id==OutputKind;
+    bool selected=(id==Strict&&cfg_.value("mode","relaxed")=="strict")||(id==Relaxed&&cfg_.value("mode","relaxed")=="relaxed")||(id==Extract&&cfg_.value("mode","")=="extract")||(nav&&id-NavTask==page_)||(id==SettingsAudio&&settingsTab_==0)||(id==SettingsNetwork&&settingsTab_==1)||(id==SettingsSounds&&settingsTab_==2)||(id==SettingsMenu&&settingsTab_==3)||(id==EnvironmentModels&&environmentTab_==1)||(id==EnvironmentBase&&environmentTab_==0);
+    bool onCard=nav||tabs||choice||id==BrowseInput||id==BrowseOutput||id==Play||id==Mapping||id==OpenOutput||id==ReviewFindings||id==ProgramMenu||id==MenuModels||id==NetworkSettings||id==TestProxy||EnvironmentRepair(id);
     auto base=CreateSolidBrush(onCard?White:Bg);FillRect(item->hDC,&r,base);DeleteObject(base);
     COLORREF fill=White,edge=nav||tabs?White:Line,ink=Ink;
     if(selected){fill=Soft;edge=nav||tabs?Soft:Accent;ink=Accent;}
@@ -384,6 +394,9 @@ void MainWindow::enableControls(bool busy) {
     for(int id:{Input,Output,BrowseInput,BrowseOutput,Strict,Relaxed,Language,Device,Silence,SilenceDb,Before,After,Minimum,DenseGap,Audit,Start,Doctor,Install,RepairPython,RepairDependencies,RepairWhisper,RepairAst,RepairFfmpeg,Save,Reset,ProxyEnabled,ProxyUrl,TestProxy}) EnableWindow(control(id),!busy);
     EnableWindow(control(Cancel),busy);
     for(int id:{Play,Mapping,OpenOutput,ReviewFindings}) EnableWindow(control(id),lastResult_.contains("output"));
+    bool menuReady=lastResult_.value("program_menu",nlohmann::json::object()).value("status","")=="ready";
+    text(ProgramMenu,menuReady?L"查看节目单":L"生成节目单");
+    EnableWindow(control(ProgramMenu),lastResult_.contains("output")&&(!busy||menuReady));EnableWindow(control(MenuEnabled),!busy);
     EnableWindow(control(ProxyUrl),!busy&&SendMessageW(control(ProxyEnabled),BM_GETCHECK,0,0)==BST_CHECKED);
     updateVisibility();layout();refreshMode();
 }

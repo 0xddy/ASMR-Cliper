@@ -12,7 +12,7 @@ enum ControlId { Input=101, Output, BrowseInput, BrowseOutput, Strict, Relaxed, 
     ProxyEnabled, ProxyUrl, TestProxy, SilenceDb, History, OpenLogs, ClearLog, NewTask,
     SettingsSounds, KeepSoftLaugh, KeepLoudLaugh, KeepVaping, KeepDrinking, KeepImpacts, Extract, RepairReview, ReviewFindings,
     EnvironmentBase, EnvironmentModels, SpeechChoice, ReviewChoice, RepairQwen, RepairAligner, RepairClap, RepairNeural,
-    KeepHeartbeat, KeepTapping, OutputKind };
+    KeepHeartbeat, KeepTapping, OutputKind, ProgramMenu, SettingsMenu, MenuEnabled, MenuModels };
 
 inline constexpr std::pair<int,const char*> SoundOptions[] = {
     {KeepSoftLaugh,"keep_soft_laugh"},{KeepHeartbeat,"keep_heartbeat"},{KeepTapping,"keep_tapping"},
@@ -46,6 +46,8 @@ private:
     void saveSettings();
     void start(bool doctor);
     void environmentTask(const std::string& action, const std::string& component = "all");
+    void programMenuTask();
+    void storeResult();
     void selectPage(int page, int tab = -1);
     void updateVisibility();
     void showChoices(int id);
@@ -56,6 +58,7 @@ private:
     void testNavigationRendering();
     void testControls();
     void testProgress();
+    void testProgramMenu();
     void testDropdowns();
     void testDropdownIdle(HWND popup);
     bool testing() const;
@@ -70,6 +73,7 @@ private:
     void prompt();
     void showText(const std::wstring& title,const std::wstring& content);
     std::wstring reviewFindingsText() const;
+    std::wstring programMenuText() const;
     void screenshot(const std::filesystem::path&, HWND popup = nullptr);
     void finishTest(DWORD code);
     int d(int value) const { return MulDiv(value, static_cast<int>(dpi_), 96); }
@@ -82,7 +86,7 @@ private:
     HINSTANCE instance_ = nullptr;
     UINT dpi_ = 96;
     std::filesystem::path root_;
-    nlohmann::json cfg_, options_, lastResult_;
+    nlohmann::json cfg_, options_, lastResult_ = nlohmann::json::object();
     nlohmann::json environment_, history_ = nlohmann::json::array();
     std::map<std::string,nlohmann::json> components_;
     std::map<int, HWND> controls_;
@@ -104,6 +108,8 @@ private:
     nlohmann::json taskProgress_ = nlohmann::json::object();
     ULONGLONG taskStarted_ = 0, taskElapsed_ = 0;
     bool timing_ = false, hasTiming_ = false;
+    bool mediaReady_ = false;
+    std::string activeOutput_;
     int dropdownTestId_ = 0;
     bool dropdownTestCancel_ = false, dropdownTestIdle_ = false;
     nlohmann::json dropdownChecks_ = nlohmann::json::array();

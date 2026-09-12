@@ -8,7 +8,7 @@ from contextvars import ContextVar
 from functools import wraps
 
 _current = ContextVar('task_progress', default=None)
-STAGES = ('音轨准备', '语音识别', '声音筛选', '剪辑规划', '成片复核', '导出校验')
+STAGES = ('音轨准备', '语音识别', '声音筛选', '剪辑规划', '成片复核', '导出校验', '生成成片节目单')
 
 
 def tracked(function):
@@ -22,12 +22,13 @@ def tracked(function):
     return run
 
 
-def phase(index, detail='', *, round_index=0, round_limit=0, legacy=None):
+def phase(index, detail='', *, round_index=0, round_limit=0, legacy=None, total=None, position=None):
     state = _current.get()
     if state is None:
         return
+    count=total if total is not None else state.get('stages',len(STAGES))
     state.clear()
-    state.update(stage=index, stages=len(STAGES), title=STAGES[index-1],
+    state.update(stage=position or index, stages=count, title=STAGES[index-1],
                  round=round_index, round_limit=round_limit, percent=None,
                  detail=detail, scopes=[], legacy=legacy)
     _emit()

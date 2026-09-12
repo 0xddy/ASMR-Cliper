@@ -51,8 +51,8 @@ def cache_lock(cache):
 
 @tracked
 def run(data):
-    phase(1, '检查输入与分析环境', legacy=(0,18))
     cfg=settings(data)
+    phase(1, '检查输入与分析环境', legacy=(0,18),total=7 if cfg['generate_program_menu'] else 6)
     source=Path(cfg['input']).resolve()
     if not source.is_file():
         raise FileNotFoundError('请选择存在的音频或视频文件。')
@@ -167,6 +167,16 @@ def run(data):
         save_json(cache/f'plan-{cfg["mode"]}.json',plan)
         if reviewer:reviewer.close()
         save_json(cache/'post-review-latest.json',report['speech_review'])
+        if cfg['generate_program_menu']:
+            from .program_menu import attach
+            # The validated media is already published. Persist it in history
+            # before starting this optional annotation step, even if cancelled.
+            report['program_menu']={'status':'pending','chapters':[]}
+            event('media_ready','成片已保存，接下来识别实际成片中的 ASMR 项目',**report)
+            phase(7,'读取最终音轨，按实际声音顺序生成节目单')
+            attach(Path(report['output']),report,cfg)
+        else:
+            report['program_menu']={'status':'disabled','chapters':[]}
         status=report['speech_review']['status']
         message='剪辑完成，原帧校验与成片模型复核通过' if status=='passed' else '成片已保存，仍有疑似话语待复听，位置见人声复核.csv' if status=='needs_review' else '剪辑完成，原编码包校验通过（未开启成片复核）'
         event('complete',message,100,**report)

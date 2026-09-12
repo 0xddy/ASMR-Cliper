@@ -121,7 +121,7 @@ MainWindow::MainWindow(fs::path root,json options):root_(std::move(root)),option
     try { if(!testing()) {history_=ReadJson(root_/L"config/history.json");if(!history_.is_array())history_=json::array();} } catch(...) {}
     const std::vector<std::string> pages{"task","history","environment","settings","logs"};
     auto page=std::find(pages.begin(),pages.end(),options_.value("page","task"));page_=page==pages.end()?0:static_cast<int>(page-pages.begin());
-    settingsTab_=options_.value("settings-tab","")=="network"?1:options_.value("settings-tab","")=="sounds"?2:0;
+    settingsTab_=options_.value("settings-tab","")=="network"?1:options_.value("settings-tab","")=="sounds"?2:options_.value("settings-tab","")=="menu"?3:0;
     environmentTab_=options_.value("environment-tab","")=="base"?0:1;
 }
 MainWindow::~MainWindow() {
@@ -138,6 +138,7 @@ void MainWindow::text(int id,const std::wstring& content) { SetWindowTextW(contr
 
 void MainWindow::beginTiming() {
     taskStarted_=GetTickCount64();taskElapsed_=0;timing_=true;hasTiming_=true;
+    mediaReady_=false;activeOutput_.clear();
     taskProgress_=json::object();SetTimer(window_,20,1000,nullptr);
 }
 void MainWindow::stopTiming() {
@@ -230,6 +231,7 @@ void MainWindow::readSettings() {
         cfg_[p.key]=n;
     }
     cfg_["review_enabled"]=SendMessageW(control(Audit),BM_GETCHECK,0,0)==BST_CHECKED;
+    cfg_["generate_program_menu"]=SendMessageW(control(MenuEnabled),BM_GETCHECK,0,0)==BST_CHECKED;
     readSoundSettings();
     cfg_["proxy_enabled"]=SendMessageW(control(ProxyEnabled),BM_GETCHECK,0,0)==BST_CHECKED;
     cfg_["proxy_url"]=Utf8(value(ProxyUrl));
@@ -306,6 +308,35 @@ void MainWindow::environmentTask(const std::string& action,const std::string& co
     }
 }
 
+void MainWindow::storeResult() {
+    const auto output=Wide(lastResult_.value("output",""));
+    auto found=std::find_if(history_.begin(),history_.end(),[&](const auto& row){return _wcsicmp(Wide(row.value("output","")).c_str(),output.c_str())==0;});
+    if(found!=history_.end())*found=lastResult_;else history_.insert(history_.begin(),lastResult_);
+    if(history_.size()>100)history_.erase(history_.begin()+100,history_.end());
+    if(!testing()) {try {WriteJson(root_/L"config/history.json",history_);}catch(const std::exception& e){appendLog(L"记录保存失败："+Wide(e.what()));}}
+    updateHistory();
+}
+
+void MainWindow::programMenuTask() {
+    if(busy_||!lastResult_.contains("output"))return;
+    try {
+        const auto output=lastResult_["output"].get<std::string>();
+        if(!fs::is_regular_file(fs::path(Wide(output))))throw std::runtime_error("成片文件不存在。");
+        auto python=environment_.contains("python")?fs::path(Wide(environment_["python"])):root_/L"runtime/venv/Scripts/python.exe";
+        if(!fs::exists(python))python=root_/L"runtime/python/python.exe";
+        if(!fs::exists(python)){selectPage(2);throw std::runtime_error("请先在运行环境中安装 Python。");}
+        fs::create_directories(root_/L"runtime/jobs");fs::create_directories(root_/L"runtime/logs");
+        const auto token=L"menu_"+std::to_wstring(GetCurrentProcessId())+L"_"+std::to_wstring(GetTickCount64());
+        auto job=root_/L"runtime/jobs"/(token+L".json");auto data=cfg_;data["input"]=output;WriteJson(job,data);
+        activeAction_="menu";cancelled_=completed_=checking_=false;downloadStatus_.clear();notice_=true;
+        beginTiming();activeOutput_=output;status_=L"正在识别成片中的 ASMR 项目…";
+        enableControls(true);appendLog(status_);
+        runner_.start(window_,python,{L"-X",L"utf8",L"-u",(root_/L"engine/main.py").wstring(),L"menu",L"--config",job.wstring()},root_,root_/L"runtime/logs"/(token+L".log"));
+    } catch(const std::exception& e) {
+        stopTiming();enableControls(false);notice_=true;status_=L"节目单未生成："+Wide(e.what());appendLog(status_);InvalidateRect(window_,nullptr,FALSE);
+    }
+}
+
 std::string MainWindow::chooseLanguage(const json& data) {
     const auto choices=data.value("choices",std::vector<std::string>{"ko","ja","zh","en"});
     const std::map<std::string,std::wstring> names{{"ko",L"韩语"},{"ja",L"日语"},{"zh",L"中文"},{"en",L"英语"}};
@@ -373,7 +404,7 @@ void MainWindow::receive(const std::string& line) {
     if(data.is_discarded()||!data.is_object()) {if(!line.empty())appendLog(Wide(line));return;}
     ++eventCount_;auto type=data.value("type","");std::wstring msg=Wide(data.value("message",""));
     if(!msg.empty())appendLog(msg);
-    if(activeAction_=="run"&&data.contains("task_progress")&&timing_&&!completed_&&!cancelled_) {
+    if((activeAction_=="run"||activeAction_=="menu")&&data.contains("task_progress")&&timing_&&!completed_&&!cancelled_) {
         const auto previous=taskProgress_;
         taskProgress_=data["task_progress"];
         status_=L"阶段 "+std::to_wstring(taskProgress_.value("stage",1))+L"/"+std::to_wstring(taskProgress_.value("stages",6))+L" · "+Wide(taskProgress_.value("title","处理中"));
@@ -382,7 +413,7 @@ void MainWindow::receive(const std::string& line) {
         if(previous.value("stage",0)!=taskProgress_.value("stage",0)||previous.value("round",0)!=round)appendLog(status_);
         double percent=taskProgress_.value("percent",json()).is_number()?taskProgress_["percent"].get<double>():0.;
         SendMessageW(control(Progress),PBM_SETPOS,static_cast<WPARAM>(std::clamp(percent,0.,100.)*10),0);
-    } else if(activeAction_!="run"||taskProgress_.empty()) {
+    } else if((activeAction_!="run"&&activeAction_!="menu")||taskProgress_.empty()) {
         if(data.contains("progress")&&data["progress"].is_number())SendMessageW(control(Progress),PBM_SETPOS,static_cast<WPARAM>(std::clamp(data["progress"].get<double>(),0.,100.)*10),0);
         if(!msg.empty()&&type!="log")status_=msg;
     }
@@ -404,9 +435,17 @@ void MainWindow::receive(const std::string& line) {
         for(const auto& row:rows) {
             if(!row.value("ok",false)) appendLog(Wide(row.value("detail",row.value("error",""))));
         }
-    } else if(type=="complete") {
-        stopTiming();
-        lastResult_=data;completed_=true;EnableWindow(control(Cancel),FALSE);
+    } else if(type=="menu_complete") {
+        stopTiming();completed_=true;EnableWindow(control(Cancel),FALSE);
+        auto menu=data.value("program_menu",json::object());
+        status_=menu.value("status","")=="ready"?L"节目单已生成 · "+std::to_wstring(menu.value("chapters",json::array()).size())+L" 项":L"成片已保留，节目单未生成："+Wide(menu.value("note","请查看日志"));
+        for(const auto& row:history_)if(row.value("output","")==activeOutput_||_wcsicmp(Wide(row.value("output","")).c_str(),Wide(data.value("output","")).c_str())==0) {
+            lastResult_=row;lastResult_["program_menu"]=menu;storeResult();break;
+        }
+    } else if(type=="complete"||type=="media_ready") {
+        const bool final=type=="complete";
+        if(final)stopTiming();
+        lastResult_=data;completed_=final;mediaReady_=true;activeOutput_=data.value("output","");EnableWindow(control(Cancel),!final);
         lastResult_["elapsed_seconds"]=elapsedSeconds();
         status_=L"完成 · "+Duration(data.value("duration",0.))+L" · "+std::to_wstring(data.value("segments",0))+L" 段";
         auto review=data.value("speech_review",json::object());
@@ -415,11 +454,11 @@ void MainWindow::receive(const std::string& line) {
         if(data.value("join_review_count",0)>0) appendLog(L"有接缝建议复听，具体位置见校验报告。");
         SYSTEMTIME now{};GetLocalTime(&now);wchar_t stamp[32]{};swprintf_s(stamp,L"%04u-%02u-%02u  %02u:%02u",now.wYear,now.wMonth,now.wDay,now.wHour,now.wMinute);
         lastResult_["finished_at"]=Utf8(stamp);lastResult_["mode"]=cfg_.value("mode","relaxed");
-        history_.insert(history_.begin(),lastResult_);if(history_.size()>100)history_.erase(history_.begin()+100,history_.end());
-        if(!testing()) {try {WriteJson(root_/L"config/history.json",history_);}catch(const std::exception& e){appendLog(L"记录保存失败："+Wide(e.what()));}}
-        updateHistory();if(!testing())selectPage(1);
+        storeResult();if(!testing())selectPage(1);
+        if(final&&data.value("program_menu",json::object()).value("status","")=="ready")status_+=L" · 节目单已生成";
+        else if(final&&(data.value("program_menu",json::object()).value("status","")=="unavailable"||data.value("program_menu",json::object()).value("status","")=="failed"))status_+=L" · 节目单未生成";
     }
-    if(type=="error"){stopTiming();notice_=true;status_=L"处理失败："+msg;if(activeAction_=="testproxy")proxyStatus_=msg;}
+    if(type=="error"){stopTiming();notice_=true;status_=std::wstring(mediaReady_||activeAction_=="menu"?L"成片已保留，节目单未生成：":L"处理失败：")+msg;if(activeAction_=="testproxy")proxyStatus_=msg;}
     if(type=="component"||type=="environment"||type=="proxy_result"){updateVisibility();layout();}
     InvalidateRect(window_,nullptr,FALSE);
 }
@@ -455,6 +494,19 @@ std::wstring MainWindow::reviewFindingsText() const {
     return content;
 }
 
+std::wstring MainWindow::programMenuText() const {
+    auto menu=lastResult_.value("program_menu",json::object());
+    std::wstring content=L"成片节目单\n时间对应最终成片 · 本地 CLAP 声音语义识别\n\n";
+    auto stamp=[](double seconds){int s=static_cast<int>(std::max(0.,seconds));wchar_t text[32]{};swprintf_s(text,L"%02d:%02d:%02d",s/3600,(s/60)%60,s%60);return std::wstring(text);};
+    for(const auto& row:menu.value("chapters",json::array())) {
+        content+=stamp(row.value("start",0.))+L" — "+stamp(row.value("end",0.))+L"   "+Wide(row.value("title","待确认"));
+        if(!row.value("review_findings",json::array()).empty())content+=L" · 含待复听位置";
+        content+=L"\n";
+    }
+    content+=L"\n相似声音可能混淆，项目切换时间约为 5 秒精度；待确认表示证据不足。";
+    return content;
+}
+
 void MainWindow::showText(const std::wstring& title,const std::wstring& content) {
     std::wstring crlf;
     for(auto c:content) { if(c==L'\n') crlf.push_back(L'\r');crlf.push_back(c); }
@@ -463,6 +515,12 @@ void MainWindow::showText(const std::wstring& title,const std::wstring& content)
     auto popup=CreateWindowExW(WS_EX_DLGMODALFRAME,wc.lpszClassName,title.c_str(),WS_OVERLAPPEDWINDOW|WS_VISIBLE,CW_USEDEFAULT,CW_USEDEFAULT,d(790),d(710),window_,nullptr,instance_,&state);
     if(!popup){appendLog(L"无法打开详情窗口。");return;}
     SetWindowTextW(GetDlgItem(popup,2),L"复制内容");
+    if(options_.contains("test-menu")) {
+        RECT owner{};GetWindowRect(window_,&owner);
+        SetWindowPos(popup,nullptr,owner.left+d(220),owner.top+d(24),0,0,SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);
+        screenshot(fs::path(Wide(options_["test-menu"])).parent_path()/L"program-menu-details.png",popup);
+        PostMessageW(popup,WM_CLOSE,0,0);
+    }
     EnableWindow(window_,FALSE);
     MSG message{};
     while(IsWindow(popup)&&GetMessageW(&message,nullptr,0,0)>0) {
@@ -561,7 +619,8 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
         if(id==History&&HIWORD(wp)==LBN_SELCHANGE) {selectHistory();return 0;}
         if(HIWORD(wp)!=BN_CLICKED) break;
         if(id>=NavTask&&id<=NavLogs) {selectPage(id-NavTask);return 0;}
-        if(id==SettingsAudio||id==SettingsNetwork||id==SettingsSounds) {selectPage(3,id==SettingsNetwork?1:id==SettingsSounds?2:0);return 0;}
+        if(id==SettingsAudio||id==SettingsNetwork||id==SettingsSounds||id==SettingsMenu) {selectPage(3,id==SettingsNetwork?1:id==SettingsSounds?2:id==SettingsMenu?3:0);return 0;}
+        if(id==MenuModels){environmentTab_=1;selectPage(2);return 0;}
         if(id==EnvironmentBase||id==EnvironmentModels) {
             environmentTab_=id==EnvironmentModels?1:0;selectPage(2);return 0;
         }
@@ -574,7 +633,7 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
         if(id==RepairReview){environmentTask("install","review");return 0;}
         if(id>=RepairQwen&&id<=RepairNeural){const char* keys[]={"qwen","aligner","clap","neural"};environmentTask("install",keys[id-RepairQwen]);return 0;}
         if(id==TestProxy) {environmentTask("testproxy");return 0;}
-        if(id==ProxyEnabled||id==Audit||IsSoundOption(id)){
+        if(id==ProxyEnabled||id==Audit||id==MenuEnabled||IsSoundOption(id)){
             SendMessageW(control(id),BM_SETCHECK,SendMessageW(control(id),BM_GETCHECK,0,0)==BST_CHECKED?BST_UNCHECKED:BST_CHECKED,0);
             if(id==ProxyEnabled){proxyTested_=false;proxyResults_=json::array();proxyStatus_.clear();if(activeAction_=="testproxy")notice_=false;}
             enableControls(busy_);return 0;
@@ -585,6 +644,7 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
             try {
                 if(settingsTab_==1) {cfg_["proxy_enabled"]=SendMessageW(control(ProxyEnabled),BM_GETCHECK,0,0)==BST_CHECKED;cfg_["proxy_url"]=Utf8(value(ProxyUrl));}
                 else if(settingsTab_==2)readSoundSettings();
+                else if(settingsTab_==3)cfg_["generate_program_menu"]=SendMessageW(control(MenuEnabled),BM_GETCHECK,0,0)==BST_CHECKED;
                 else readSettings();
                 saveSettings();notice_=true;status_=L"设置已保存。";
             }catch(const std::exception& e){notice_=true;status_=L"无法保存："+Wide(e.what());}
@@ -593,6 +653,7 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
         if(id==Reset) {
             try {auto defaults=ReadJson(root_/L"config/defaults.json");
                 if(settingsTab_==2)for(auto option:SoundOptions)cfg_[option.second]=defaults[option.second];
+                else if(settingsTab_==3)cfg_["generate_program_menu"]=defaults["generate_program_menu"];
                 else for(auto key:settingsTab_==1?std::vector<std::string>{"proxy_enabled","proxy_url"}:std::vector<std::string>{"language","device","silence_seconds","silence_db","review_enabled","strict_pre","strict_post","strict_min_section","strict_dense_gap"}) cfg_[key]=defaults[key];
                 populateSettings(settingsTab_);enableControls(busy_);saveSettings();notice_=true;status_=L"已恢复默认设置。";
             }catch(const std::exception& e){status_=Wide(e.what());}InvalidateRect(window_,nullptr,FALSE);return 0;
@@ -612,6 +673,9 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
             else appendLog(L"输出目录尚未创建，完成首次剪辑后即可打开。");
         } else if(id==ReviewFindings&&lastResult_.contains("output")) {
             showText(L"待复听位置 · "+fs::path(Wide(lastResult_["output"])).filename().wstring(),reviewFindingsText());
+        } else if(id==ProgramMenu&&lastResult_.contains("output")) {
+            if(lastResult_.value("program_menu",json::object()).value("status","")=="ready")showText(L"成片节目单 · "+fs::path(Wide(lastResult_["output"])).filename().wstring(),programMenuText());
+            else programMenuTask();
         } else if((id==Play||id==Mapping)&&lastResult_.contains("output")) {
             fs::path target=Wide(lastResult_["output"]);if(id==Mapping) target=target.parent_path()/L"剪辑时间对照.csv";
             if(fs::exists(target)) ShellExecuteW(window_,L"open",target.c_str(),nullptr,nullptr,SW_SHOWNORMAL);
@@ -633,10 +697,19 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
             if(cancelled_&&activeAction_=="testproxy") proxyStatus_=L"连接测试已取消，可以重新测试。";
         }
         enableControls(false);
-        if(cancelled_) { notice_=true;status_=L"任务已取消。";appendLog(status_); }
+        if((cancelled_||wp!=0)&&(mediaReady_||activeAction_=="menu")) {
+            for(const auto& row:history_)if(row.value("output","")==activeOutput_) {
+                lastResult_=row;
+                if(lastResult_.value("program_menu",json::object()).value("status","")!="ready")lastResult_["program_menu"]={{"status",cancelled_?"cancelled":"failed"},{"chapters",json::array()}};
+                if(mediaReady_)lastResult_["elapsed_seconds"]=elapsedSeconds();
+                storeResult();break;
+            }
+            notice_=true;status_=cancelled_?L"成片已保留，节目单生成已取消。":L"成片已保留，节目单暂未生成，请查看日志。";
+        }
+        else if(cancelled_) { notice_=true;status_=L"任务已取消。";appendLog(status_); }
         else if(wp!=0||!completed_) { if(status_.find(L"失败")==std::wstring::npos) status_=L"处理未完成，请查看日志。"; }
         InvalidateRect(window_,nullptr,FALSE);
-        if(testing()) finishTest(wp==0&&completed_?0:1);
+        if(testing()&&!options_.contains("test-menu")) finishTest(wp==0&&completed_?0:1);
         return 0;
     }
     case WM_TIMER:
@@ -646,7 +719,8 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
         }
         if(wp!=1)return 0;
         KillTimer(window_,1);
-        if(options_.contains("test-progress")) testProgress();
+        if(options_.contains("test-menu")) testProgramMenu();
+        else if(options_.contains("test-progress")) testProgress();
         else if(options_.contains("test-dropdowns")) testDropdowns();
         else if(options_.contains("test-controls")) testControls();
         else if(options_.contains("test-navigation")) testNavigationRendering();

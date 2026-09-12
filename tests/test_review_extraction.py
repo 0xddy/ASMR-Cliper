@@ -165,7 +165,7 @@ class ReviewExtractionTests(unittest.TestCase):
             for mode,empty in [('strict',False),('relaxed',False),('extract',False),('extract',True)]:
                 with self.subTest(mode=mode,replan_empty=empty):
                     cfg=settings({'input':str(source),'output_dir':str(folder/'out'),'cache_dir':str(folder/'cache'),
-                                  'mode':mode,'review_max_passes':2,'audit':False})
+                                  'mode':mode,'review_max_passes':2,'audit':False,'generate_program_menu':False})
                     recognizer=MagicMock();recognizer.scan.return_value={'spoken':[],'language':'en'}
                     classifier=MagicMock();classifier.music_intervals.return_value=[]
                     classifier.exclusions.return_value={key:[] for key in ('voice','soft_laugh','heartbeat','tapping','loud_laugh','airflow','drinking','impacts')}

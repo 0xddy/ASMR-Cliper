@@ -2,6 +2,49 @@
 #include <commctrl.h>
 #include <algorithm>
 
+void MainWindow::testProgramMenu() {
+    using json=nlohmann::json;
+    json checks=json::array();
+    auto check=[&](const char* name,bool passed){checks.push_back({{"name",name},{"passed",passed}});};
+    auto visible=[&](int id){return (GetWindowLongPtrW(control(id),GWL_STYLE)&WS_VISIBLE)!=0;};
+    const auto folder=std::filesystem::path(Wide(options_["test-menu"])).parent_path();
+    SetWindowPos(window_,nullptr,0,0,d(1100),d(800),SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
+    selectPage(3,3);
+    check("menu preference is a separate page",visible(MenuEnabled)&&!visible(Audit)&&!visible(KeepSoftLaugh)&&!visible(ProxyUrl));
+    const auto language=cfg_["language"];text(Silence,L"unfinished value");
+    SendMessageW(control(MenuEnabled),BM_SETCHECK,BST_UNCHECKED,0);SendMessageW(control(Save),BM_CLICK,0,0);
+    check("menu settings save without reading other unfinished fields",cfg_["generate_program_menu"]==false&&cfg_["language"]==language);
+    SendMessageW(control(Reset),BM_CLICK,0,0);
+    check("menu default resets independently",cfg_["generate_program_menu"]==true&&value(Silence)==L"unfinished value");
+    screenshot(folder/L"program-menu-settings.png");
+    activeAction_="run";completed_=cancelled_=false;beginTiming();enableControls(true);
+    json report={{"type","media_ready"},{"output","example_ASMR_v3.m4a"},{"duration",180.},{"segments",4},
+        {"speech_review",{{"status","passed"}}},{"program_menu",{{"status","pending"},{"chapters",json::array()}}}};
+    receive(report.dump());
+    check("validated media enters history before menu inference",history_.size()==1&&mediaReady_&&!completed_&&timing_&&!IsWindowEnabled(control(ProgramMenu)));
+    json menu={{"status","ready"},{"chapters",json::array({
+        {{"start",0.},{"end",70.},{"title","舔耳 / 湿润口腔音"}},
+        {{"start",70.},{"end",130.},{"title","道具敲击"}},
+        {{"start",130.},{"end",160.},{"title","心跳"}},
+        {{"start",160.},{"end",180.},{"title","待确认"}}})}};
+    report["type"]="complete";report["program_menu"]=menu;receive(report.dump());enableControls(false);selectPage(1);
+    check("final menu updates the same history entry",history_.size()==1&&completed_&&value(ProgramMenu)==L"查看节目单");
+    const auto content=programMenuText();
+    check("menu shows actual playback order and output times",content.find(L"00:01:10")!=std::wstring::npos&&content.find(L"舔耳")<content.find(L"道具敲击")&&content.find(L"道具敲击")<content.find(L"心跳")&&content.find(L"待确认")!=std::wstring::npos);
+    screenshot(folder/L"program-menu-history.png");SendMessageW(control(ProgramMenu),BM_CLICK,0,0);
+    const auto elapsed=history_[0]["elapsed_seconds"];
+    activeAction_="menu";completed_=false;beginTiming();activeOutput_="example_ASMR_v3.m4a";
+    receive(json{{"type","menu_complete"},{"output",activeOutput_},{"program_menu",menu}}.dump());
+    check("old output annotation keeps original task duration and record",history_.size()==1&&history_[0]["elapsed_seconds"]==elapsed&&history_[0]["duration"]==180.);
+    activeAction_="run";completed_=cancelled_=false;beginTiming();enableControls(true);
+    report["type"]="media_ready";report["output"]="cancelled_menu_ASMR_v4.m4a";report["program_menu"]={{"status","pending"}};receive(report.dump());
+    cancelled_=true;SendMessageW(window_,WM_ENGINE_DONE,ERROR_CANCELLED,0);
+    check("cancelling menu keeps the finished output and history",history_.size()==2&&history_[0]["program_menu"]["status"]=="cancelled"&&status_.find(L"成片已保留")!=std::wstring::npos&&!timing_);
+    bool passed=std::all_of(checks.begin(),checks.end(),[](const auto& row){return row.at("passed").template get<bool>();});
+    WriteJson(std::filesystem::path(Wide(options_["test-menu"])),{{"passed",passed},{"checks",checks}});
+    completed_=passed;finishTest(passed?0:1);
+}
+
 void MainWindow::testProgress() {
     nlohmann::json checks=nlohmann::json::array();
     auto check=[&](const char* name,bool passed){checks.push_back({{"name",name},{"passed",passed}});};

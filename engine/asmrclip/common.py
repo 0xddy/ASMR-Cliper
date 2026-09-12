@@ -93,6 +93,7 @@ def settings(data):
     if cfg['mode'] not in ('strict', 'relaxed', 'extract'):
         raise ValueError('未知剪辑模式。')
     if not isinstance(cfg['review_enabled'],bool):raise ValueError('review_enabled 必须为布尔值。')
+    if not isinstance(cfg['generate_program_menu'],bool):raise ValueError('generate_program_menu 必须为布尔值。')
     if type(cfg['review_max_passes']) is not int or not 1<=cfg['review_max_passes']<=5:raise ValueError('复核轮数必须为 1 到 5 的整数。')
     for name, low, high in [('strict_pre', 0, 60), ('strict_post', 0, 60),
                             ('strict_min_section', 1, 600), ('strict_dense_gap', 0, 120),
