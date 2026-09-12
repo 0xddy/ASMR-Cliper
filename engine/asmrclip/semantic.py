@@ -38,8 +38,61 @@ PROMPTS={
 def semantic_scores(scores):
     result={};cursor=0
     for key,items in PROMPTS.items():
-        result[key]=float(max(scores[cursor:cursor+len(items)]));cursor+=len(items)
+        result[key]=float(max(scores[cursor:cursor+len(items)]))
+        if key=='other':
+            # Only room noise/hum/silence and electronic static. Breathing and
+            # music are separate activities, not proof of background residue.
+            result['background']=float(max(scores[cursor+2:cursor+len(items)]))
+        cursor+=len(items)
     return result
+
+
+class SoundMatcher:
+    """Share one lazy CLAP worker/cache between transition checks and V4."""
+    def __init__(self,cfg,pcm,cache):
+        self.cfg,self.pcm,self.path=cfg,pcm,cache/'semantic-cache.json'
+        self.client=None;self.identity=None;self.cached={}
+
+    def available(self):
+        assets=[a for a in read_json(ROOT/'config/environment.json')['assets'] if a['component']=='clap']
+        return (bool(assets) and (ROOT/'runtime/neural/python.exe').is_file()
+                and all((ROOT/a['path']).is_file() and (ROOT/a['path']).stat().st_size==a['size'] for a in assets))
+
+    def score(self,records,progress=None,required_keys=()):
+        if not records:return []
+        if self.identity is None:
+            self.identity=hashlib.sha256(json.dumps([model_signature(ROOT/'models/clap'),PROMPTS,'clap-1']).encode()).hexdigest()
+            previous=read_json(self.path) if self.path.exists() else {}
+            self.cached=previous.get('windows',{}) if previous.get('model')==self.identity else {}
+        wanted=[(r,f'{r["start"]:.5f}:{r["end"]:.5f}') for r in records]
+        pending=list({k:r for r,k in wanted if k not in self.cached or any(name not in self.cached[k] for name in required_keys)}.items())
+        if pending and self.client is None:
+            from .neural_client import NeuralClient
+            self.client=NeuralClient('clap',self.cfg)
+        for offset in range(0,len(pending),8):
+            batch=pending[offset:offset+8];a=min(r['start'] for k,r in batch);b=max(r['end'] for k,r in batch)
+            # Pack sparse probes without materializing all the audio between
+            # distant transitions. Retain the previous batch-relative rounding.
+            parts=[];clips=[];cursor=0;origin=round(a*16000);limit=round(b*16000)
+            for key,r in batch:
+                lo=min(limit,origin+round((r['start']-a)*16000))
+                hi=min(limit,origin+round((r['end']-a)*16000))
+                part=np.asarray(self.pcm[lo:hi],np.float32)/32768
+                parts.append(part);clips.append([cursor/16000,(cursor+len(part))/16000]);cursor+=len(part)
+            audio=np.concatenate(parts)
+            scores=self.client.request({'op':'classify','clips':clips,
+                'prompts':sum(PROMPTS.values(),[])},audio)
+            if len(scores)!=len(batch):raise RuntimeError('声音模型返回的窗口数量不完整。')
+            for (key,r),score in zip(batch,scores):self.cached[key]=semantic_scores(score)
+            save_json(self.path,{'model':self.identity,'windows':self.cached})
+            if progress:progress(min(offset+8,len(pending)),len(pending))
+        return [{**r,'semantic':self.cached[k]} for r,k in wanted]
+
+    def close(self):
+        if self.client:self.client.close();self.client=None
+
+    def __enter__(self):return self
+    def __exit__(self,*args):self.close()
 
 
 def positive(record,seed=False,cfg=None):
@@ -78,7 +131,7 @@ def semantic_regions(records,cfg=None):
             'windows_checked':len(rows),'positive_windows':sum(positive(r,cfg=cfg) for r in rows),'model':'CLAP HTSAT unfused'}
 
 
-def confirm(cfg,pcm,cache,classifier,speech,music,exclusions,duration):
+def confirm(cfg,pcm,cache,classifier,speech,music,exclusions,duration,matcher=None):
     from .exclusions import selected_exclusions
     blocked=merge(speech['spoken']+music+exclusions.get('voice',[])+selected_exclusions(exclusions,cfg)+sum((exclusions.get(k,[]) for k in ('airflow','drinking','impacts','loud_laugh')),[]))
     windows=[]
@@ -87,28 +140,15 @@ def confirm(cfg,pcm,cache,classifier,speech,music,exclusions,duration):
             if b-t>=3:windows.append((float(t),float(min(t+10,b))))
     records=classifier.windows(windows)
     classifier.close()
-    path=cache/'semantic-cache.json'
-    identity=hashlib.sha256(json.dumps([model_signature(ROOT/'models/clap'),PROMPTS,'clap-1']).encode()).hexdigest()
-    previous=read_json(path) if path.exists() else {}
-    cached=previous.get('windows',{}) if previous.get('model')==identity else {}
-    wanted=[(r,f'{r["start"]:.5f}:{r["end"]:.5f}') for r in records]
-    pending=[(r,k) for r,k in wanted if not r.get('quiet') and k not in cached]
-    client=None
+    owned=matcher is None
+    matcher=matcher or SoundMatcher(cfg,pcm,cache)
     try:
-        if pending:
-            from .neural_client import NeuralClient
-            client=NeuralClient('clap',cfg)
-        for offset in range(0,len(pending),8):
-            batch=pending[offset:offset+8];a=min(r['start'] for r,k in batch);b=max(r['end'] for r,k in batch)
-            audio=np.asarray(pcm[round(a*16000):round(b*16000)],np.float32)/32768
-            scores=client.request({'op':'classify','clips':[[r['start']-a,r['end']-a] for r,k in batch],
-                'prompts':sum(PROMPTS.values(),[])},audio)
-            for (r,k),score in zip(batch,scores):cached[k]=semantic_scores(score)
-            save_json(path,{'model':identity,'windows':cached})
-            event('progress',f'确认 ASMR 声音：{min(offset+8,len(pending))} / {len(pending)} 个窗口',66+3*min(1,(offset+8)/len(pending)))
+        scored=matcher.score([r for r in records if not r.get('quiet')],
+            lambda done,total:event('progress',f'确认 ASMR 声音：{done} / {total} 个窗口',66+3*done/total))
     finally:
-        if client:client.close()
-    rows=[{**r,'semantic':cached.get(k,{})} for r,k in wanted]
+        if owned:matcher.close()
+    by_span={(r['start'],r['end']):r for r in scored}
+    rows=[by_span.get((r['start'],r['end']),{**r,'semantic':{}}) for r in records]
     report=semantic_regions(rows,cfg);report['records']=rows
     save_json(cache/'extraction-evidence.json',report)
     return report

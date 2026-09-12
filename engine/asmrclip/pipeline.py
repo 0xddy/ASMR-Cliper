@@ -85,12 +85,18 @@ def run(data):
         music=classifier.music_intervals(meta['analysis_duration'])
         event('progress','检查人声、笑声、休息与突兀撞击',65)
         exclusions=classifier.exclusions(speech,music,meta['analysis_duration'])
-        if cfg['mode']=='extract':
-            from .semantic import confirm
-            event('progress','确认 ASMR 声音与连续动作',66)
-            exclusions['extraction']=confirm(cfg,pcm,cache,classifier,speech,music,exclusions,meta['analysis_duration'])
-            exclusions['extraction'].pop('records',None)
-            save_json(cache/'exclusions-latest.json',exclusions)
+        from .semantic import confirm,SoundMatcher
+        from .transitions import review_transitions
+        with SoundMatcher(cfg,pcm,cache) as matcher:
+            exclusions['transitions'],exclusions['transition_review']=review_transitions(
+                cfg,pcm,cache,classifier,matcher,speech,music,exclusions,meta['analysis_duration'])
+            if cfg['mode']=='extract':
+                event('progress','确认 ASMR 声音与连续动作',66)
+                exclusions['extraction']=confirm(cfg,pcm,cache,classifier,speech,music,exclusions,meta['analysis_duration'],matcher)
+                exclusions['extraction'].pop('records',None)
+        save_json(cache/'exclusions-latest.json',exclusions)
+        if exclusions['transition_review']['candidates']:
+            event('log',f'音色过渡检查：{len(exclusions["transition_review"]["candidates"])} 处候选，确认删除 {len(exclusions["transitions"])} 处非 ASMR 中断残留。')
         event('log',f'检出：{len(exclusions["voice"])} 处人声，{len(exclusions["soft_laugh"])} 处轻笑，{len(exclusions["heartbeat"])} 处心跳，{len(exclusions["tapping"])} 处道具敲击，{len(exclusions["loud_laugh"])} 处大笑，{len(exclusions["airflow"])} 处呼气/烟雾类气流动作，{len(exclusions["drinking"])} 处疑似饮水休息，{len(exclusions["impacts"])} 处突兀撞击。按保留选项生成剪辑计划。')
         event('progress','按所选模式寻找自然切点',70)
         plan=make_plan(meta,frames,speech,music,cfg,classifier,exclusions)

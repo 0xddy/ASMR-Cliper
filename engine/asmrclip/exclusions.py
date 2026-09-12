@@ -57,7 +57,9 @@ def laugh_kind(record):
 
 def selected_exclusions(report, cfg):
     """Apply retention policy on every plan, including plans after ASR audit."""
-    intervals=[]
+    # Confirmed interruption residue is separate from intentional bass ASMR
+    # and from optional sound categories such as heartbeat or exhalation.
+    intervals=list(report.get('transitions',[]))
     for category,key in [('soft_laugh','keep_soft_laugh'),('loud_laugh','keep_loud_laugh'),
                          ('airflow','keep_vaping'),('drinking','keep_drinking'),('impacts','keep_impacts'),
                          ('heartbeat','keep_heartbeat'),('tapping','keep_tapping')]:
