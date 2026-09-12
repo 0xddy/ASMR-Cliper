@@ -12,7 +12,8 @@ enum ControlId { Input=101, Output, BrowseInput, BrowseOutput, Strict, Relaxed, 
     ProxyEnabled, ProxyUrl, TestProxy, SilenceDb, History, OpenLogs, ClearLog, NewTask,
     SettingsSounds, KeepSoftLaugh, KeepLoudLaugh, KeepVaping, KeepDrinking, KeepImpacts, Extract, RepairReview, ReviewFindings,
     EnvironmentBase, EnvironmentModels, SpeechChoice, ReviewChoice, RepairQwen, RepairAligner, RepairClap, RepairNeural,
-    KeepHeartbeat, KeepTapping, OutputKind, ProgramMenu, SettingsMenu, MenuEnabled, MenuModels };
+    KeepHeartbeat, KeepTapping, OutputKind, ProgramMenu, SettingsMenu, MenuEnabled, MenuModels,
+    SettingsFade, FadeEnabled, FadeSeconds };
 
 inline constexpr std::pair<int,const char*> SoundOptions[] = {
     {KeepSoftLaugh,"keep_soft_laugh"},{KeepHeartbeat,"keep_heartbeat"},{KeepTapping,"keep_tapping"},
@@ -41,6 +42,7 @@ private:
     void enableControls(bool busy);
     void readSettings();
     void readSoundSettings();
+    void readFadeSettings();
     void readModelSettings();
     std::vector<std::string> requiredComponents() const;
     void saveSettings();

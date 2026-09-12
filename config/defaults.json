@@ -13,6 +13,8 @@
   "audit": false,
   "review_enabled": true,
   "generate_program_menu": true,
+  "join_fade_enabled": false,
+  "join_fade_seconds": 0.3,
   "review_model": "models/whisper-review",
   "review_max_passes": 3,
   "keep_soft_laugh": true,

@@ -69,7 +69,8 @@ def run(data):
     from .model_catalog import validate_models
     from .common import ROOT
     media=inspect_media(source,cfg.get('output_kind','auto'))
-    event('log','输出视频，复制源视频与音频编码；切点按关键帧向内调整。' if media['kind']=='video' else '输出音频，复制原编码。')
+    event('log',('输出视频，画面原编码复制；切点按关键帧向内调整。' if media['kind']=='video' else '输出音频。')+
+          (' 接缝淡化已开启，音轨需要重新编码。' if cfg['join_fade_enabled'] else ' 音轨原编码包直接复制。'))
     if media['audio_tracks']>1:event('log',f'检测到 {media["audio_tracks"]} 个音轨：本次只分析并输出第一个音轨。')
     validate_models(cfg,ROOT)
     if cfg['review_enabled'] or cfg['mode']=='extract':validate_review_model(cfg)
@@ -131,7 +132,7 @@ def run(data):
             if reviewer:
                 phase(5, '准备本轮候选音轨', round_index=attempt+1, round_limit=cfg['review_max_passes'])
             else:
-                phase(6, '复制原编码（未开启成片复核）', legacy=(89,100))
+                phase(6, '准备导出（未开启成片复核）', legacy=(89,100))
             plan['review_passes']=passes
             try:
                 report=export(source,cfg['output_dir'],meta,frames,plan,cfg,identity,reviewer,
@@ -178,6 +179,6 @@ def run(data):
         else:
             report['program_menu']={'status':'disabled','chapters':[]}
         status=report['speech_review']['status']
-        message='剪辑完成，原帧校验与成片模型复核通过' if status=='passed' else '成片已保存，仍有疑似话语待复听，位置见人声复核.csv' if status=='needs_review' else '剪辑完成，原编码包校验通过（未开启成片复核）'
+        message='剪辑完成，导出校验与成片模型复核通过' if status=='passed' else '成片已保存，仍有疑似话语待复听，位置见人声复核.csv' if status=='needs_review' else '剪辑完成，导出校验通过（未开启成片复核）'
         event('complete',message,100,**report)
         return report

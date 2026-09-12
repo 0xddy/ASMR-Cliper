@@ -113,6 +113,9 @@ void MainWindow::testDropdownIdle(HWND popup) {
         auto path=std::filesystem::path(Wide(options_["test-dropdowns"])).parent_path()/
             (L"dropdown-"+std::to_wstring(dropdownTestId_)+L".png");
         screenshot(path,popup);
+        // Mouse hover can preselect a row while the screenshot is captured.
+        // Anchor keyboard navigation before testing wraparound to the last row.
+        PostMessageW(window_,WM_KEYDOWN,VK_HOME,1);
         PostMessageW(window_,WM_KEYDOWN,VK_UP,1);
         PostMessageW(window_,WM_KEYDOWN,VK_RETURN,1);
     } else {
@@ -214,6 +217,18 @@ void MainWindow::testControls() {
     populateSettings(0);enableControls(true);
     check("retention options disabled during task",!IsWindowEnabled(control(KeepSoftLaugh))&&!IsWindowEnabled(control(KeepHeartbeat))&&!IsWindowEnabled(control(KeepTapping))&&!IsWindowEnabled(control(KeepImpacts)));
     enableControls(false);
+    click(SettingsFade);
+    check("join fades have their own settings page",settingsTab_==4&&visible(FadeEnabled)&&visible(FadeSeconds)&&!visible(KeepTapping));
+    click(Reset);check("fades default off at 0.3 seconds",!checked(FadeEnabled)&&value(FadeSeconds)==L"0.3"&&!IsWindowEnabled(control(FadeSeconds)));
+    text(Silence,L"invalid hidden field");click(FadeEnabled);text(FadeSeconds,L"0.45");click(Save);
+    check("fade settings save independently",cfg_["join_fade_enabled"]==true&&cfg_["join_fade_seconds"]==.45&&IsWindowEnabled(control(FadeSeconds)));
+    populateSettings(4);check("fade duration round trip",value(FadeSeconds)==L"0.45");
+    enableControls(true);check("fade settings locked during work",!IsWindowEnabled(control(FadeEnabled))&&!IsWindowEnabled(control(FadeSeconds)));enableControls(false);
+    text(FadeSeconds,L"nan");click(Save);check("nonfinite fade duration rejected",cfg_["join_fade_seconds"]==.45);
+    text(FadeSeconds,L"0.3");click(Save);
+    screenshot(std::filesystem::path(Wide(options_["test-controls"])).parent_path()/L"audio-fade-settings.png");
+    click(Reset);populateSettings(0);readSettings();
+    check("fade reset reaches export settings without changing other pages",cfg_["join_fade_enabled"]==false&&cfg_["join_fade_seconds"]==.3);
     selectPage(1);
     check("empty history only offers new task",visible(NewTask)&&!visible(History)&&!visible(Play)&&!visible(Mapping)&&!visible(OpenOutput));
     click(NewTask);check("new task opens editor",page_==0&&visible(Input));

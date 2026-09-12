@@ -121,7 +121,7 @@ MainWindow::MainWindow(fs::path root,json options):root_(std::move(root)),option
     try { if(!testing()) {history_=ReadJson(root_/L"config/history.json");if(!history_.is_array())history_=json::array();} } catch(...) {}
     const std::vector<std::string> pages{"task","history","environment","settings","logs"};
     auto page=std::find(pages.begin(),pages.end(),options_.value("page","task"));page_=page==pages.end()?0:static_cast<int>(page-pages.begin());
-    settingsTab_=options_.value("settings-tab","")=="network"?1:options_.value("settings-tab","")=="sounds"?2:options_.value("settings-tab","")=="menu"?3:0;
+    settingsTab_=options_.value("settings-tab","")=="network"?1:options_.value("settings-tab","")=="sounds"?2:options_.value("settings-tab","")=="menu"?3:options_.value("settings-tab","")=="fade"?4:0;
     environmentTab_=options_.value("environment-tab","")=="base"?0:1;
 }
 MainWindow::~MainWindow() {
@@ -200,6 +200,15 @@ void MainWindow::setFonts() {
 void MainWindow::readSoundSettings() {
     for(auto [id,key]:SoundOptions)cfg_[key]=SendMessageW(control(id),BM_GETCHECK,0,0)==BST_CHECKED;
 }
+void MainWindow::readFadeSettings() {
+    bool enabled=SendMessageW(control(FadeEnabled),BM_GETCHECK,0,0)==BST_CHECKED;
+    if(enabled) {
+        auto input=value(FadeSeconds);size_t used=0;double seconds=std::stod(input,&used);
+        if(used!=input.size()||!std::isfinite(seconds)||seconds<.05||seconds>2.)throw std::runtime_error("淡化时长须为 0.05 到 2 秒。");
+        cfg_["join_fade_seconds"]=seconds;
+    }
+    cfg_["join_fade_enabled"]=enabled;
+}
 void MainWindow::readModelSettings() {
     const std::vector<std::string> models{"whisper-large-v3","qwen3-asr","whisper-turbo"};
     int speech=static_cast<int>(SendMessageW(control(SpeechChoice),CB_GETCURSEL,0,0));
@@ -233,6 +242,7 @@ void MainWindow::readSettings() {
     cfg_["review_enabled"]=SendMessageW(control(Audit),BM_GETCHECK,0,0)==BST_CHECKED;
     cfg_["generate_program_menu"]=SendMessageW(control(MenuEnabled),BM_GETCHECK,0,0)==BST_CHECKED;
     readSoundSettings();
+    readFadeSettings();
     cfg_["proxy_enabled"]=SendMessageW(control(ProxyEnabled),BM_GETCHECK,0,0)==BST_CHECKED;
     cfg_["proxy_url"]=Utf8(value(ProxyUrl));
 }
@@ -478,6 +488,7 @@ void MainWindow::prompt() {
     if(!any)content+=L"无";
     content+=L"。当前选择优先于默认设置；与说话重叠或无法自然衔接的片段仍可能被一起剪掉。";
     content+=L"\n成片大模型复核："+std::wstring(extract||SendMessageW(control(Audit),BM_GETCHECK,0,0)==BST_CHECKED?L"开启":L"关闭")+L"。";
+    content+=L"\n接缝淡化："+std::wstring(SendMessageW(control(FadeEnabled),BM_GETCHECK,0,0)==BST_CHECKED?L"开启，音轨重新编码；每侧最多 "+value(FadeSeconds)+L" 秒。":L"关闭，原音频包直接复制。");
     showText(strict?L"严格模式（V2）提示词":extract?L"提取模式（V4）提示词":L"宽松模式（V3）提示词",content);
 }
 
@@ -619,7 +630,7 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
         if(id==History&&HIWORD(wp)==LBN_SELCHANGE) {selectHistory();return 0;}
         if(HIWORD(wp)!=BN_CLICKED) break;
         if(id>=NavTask&&id<=NavLogs) {selectPage(id-NavTask);return 0;}
-        if(id==SettingsAudio||id==SettingsNetwork||id==SettingsSounds||id==SettingsMenu) {selectPage(3,id==SettingsNetwork?1:id==SettingsSounds?2:id==SettingsMenu?3:0);return 0;}
+        if(id==SettingsAudio||id==SettingsNetwork||id==SettingsSounds||id==SettingsMenu||id==SettingsFade) {selectPage(3,id==SettingsNetwork?1:id==SettingsSounds?2:id==SettingsMenu?3:id==SettingsFade?4:0);return 0;}
         if(id==MenuModels){environmentTab_=1;selectPage(2);return 0;}
         if(id==EnvironmentBase||id==EnvironmentModels) {
             environmentTab_=id==EnvironmentModels?1:0;selectPage(2);return 0;
@@ -633,7 +644,7 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
         if(id==RepairReview){environmentTask("install","review");return 0;}
         if(id>=RepairQwen&&id<=RepairNeural){const char* keys[]={"qwen","aligner","clap","neural"};environmentTask("install",keys[id-RepairQwen]);return 0;}
         if(id==TestProxy) {environmentTask("testproxy");return 0;}
-        if(id==ProxyEnabled||id==Audit||id==MenuEnabled||IsSoundOption(id)){
+        if(id==ProxyEnabled||id==Audit||id==MenuEnabled||id==FadeEnabled||IsSoundOption(id)){
             SendMessageW(control(id),BM_SETCHECK,SendMessageW(control(id),BM_GETCHECK,0,0)==BST_CHECKED?BST_UNCHECKED:BST_CHECKED,0);
             if(id==ProxyEnabled){proxyTested_=false;proxyResults_=json::array();proxyStatus_.clear();if(activeAction_=="testproxy")notice_=false;}
             enableControls(busy_);return 0;
@@ -645,6 +656,7 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
                 if(settingsTab_==1) {cfg_["proxy_enabled"]=SendMessageW(control(ProxyEnabled),BM_GETCHECK,0,0)==BST_CHECKED;cfg_["proxy_url"]=Utf8(value(ProxyUrl));}
                 else if(settingsTab_==2)readSoundSettings();
                 else if(settingsTab_==3)cfg_["generate_program_menu"]=SendMessageW(control(MenuEnabled),BM_GETCHECK,0,0)==BST_CHECKED;
+                else if(settingsTab_==4)readFadeSettings();
                 else readSettings();
                 saveSettings();notice_=true;status_=L"设置已保存。";
             }catch(const std::exception& e){notice_=true;status_=L"无法保存："+Wide(e.what());}
@@ -654,6 +666,7 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
             try {auto defaults=ReadJson(root_/L"config/defaults.json");
                 if(settingsTab_==2)for(auto option:SoundOptions)cfg_[option.second]=defaults[option.second];
                 else if(settingsTab_==3)cfg_["generate_program_menu"]=defaults["generate_program_menu"];
+                else if(settingsTab_==4){cfg_["join_fade_enabled"]=defaults["join_fade_enabled"];cfg_["join_fade_seconds"]=defaults["join_fade_seconds"];}
                 else for(auto key:settingsTab_==1?std::vector<std::string>{"proxy_enabled","proxy_url"}:std::vector<std::string>{"language","device","silence_seconds","silence_db","review_enabled","strict_pre","strict_post","strict_min_section","strict_dense_gap"}) cfg_[key]=defaults[key];
                 populateSettings(settingsTab_);enableControls(busy_);saveSettings();notice_=true;status_=L"已恢复默认设置。";
             }catch(const std::exception& e){status_=Wide(e.what());}InvalidateRect(window_,nullptr,FALSE);return 0;
