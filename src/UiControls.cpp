@@ -1,6 +1,9 @@
 #include "UiControls.h"
 #include "UiTheme.h"
 #include <commctrl.h>
+#include <objidl.h>
+#include <gdiplus.h>
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -13,13 +16,35 @@ struct ChoiceItem {
     bool checked;
     int scale(int value) const {return MulDiv(value,dpi,96);}
 };
-struct State { bool toggle=false; bool checked=false; int selection=-1; std::vector<std::wstring> choices; };
+constexpr UINT_PTR AnimationTimer=0xAC11;
+constexpr double AnimationDuration=180.;
+struct State {
+    bool toggle=false,checked=false,animated=false,animating=false;
+    double position=0.,from=0.;ULONGLONG started=0;
+    int selection=-1;std::vector<std::wstring> choices;
+};
+void FinishAnimation(HWND window,State* state) {
+    KillTimer(window,AnimationTimer);state->animating=false;state->position=state->checked?1.:0.;
+}
+double Position(HWND window,State* state) {
+    if(state->animating) {
+        double t=std::min(1.,(GetTickCount64()-state->started)/AnimationDuration);
+        double ease=1.-(1.-t)*(1.-t)*(1.-t);
+        state->position=state->from+((state->checked?1.:0.)-state->from)*ease;
+        if(t>=1.)FinishAnimation(window,state);
+    }
+    return state->position;
+}
 LRESULT CALLBACK ControlProc(HWND window,UINT message,WPARAM wp,LPARAM lp,UINT_PTR subclass,DWORD_PTR data) {
     auto state=reinterpret_cast<State*>(data);
-    if(message==WM_NCDESTROY) {RemoveWindowSubclass(window,ControlProc,subclass);delete state;return DefSubclassProc(window,message,wp,lp);}
+    if(message==WM_NCDESTROY) {KillTimer(window,AnimationTimer);RemoveWindowSubclass(window,ControlProc,subclass);delete state;return DefSubclassProc(window,message,wp,lp);}
     if(state->toggle) {
         if(message==BM_GETCHECK)return state->checked?BST_CHECKED:BST_UNCHECKED;
-        if(message==BM_SETCHECK) {state->checked=wp==BST_CHECKED;InvalidateRect(window,nullptr,FALSE);return 0;}
+        if(message==BM_SETCHECK) {state->checked=wp==BST_CHECKED;FinishAnimation(window,state);InvalidateRect(window,nullptr,FALSE);return 0;}
+        if(message==WM_TIMER&&wp==AnimationTimer) {Position(window,state);InvalidateRect(window,nullptr,FALSE);return 0;}
+        if((message==WM_SHOWWINDOW||message==WM_ENABLE)&&!wp) {
+            FinishAnimation(window,state);InvalidateRect(window,nullptr,FALSE);
+        }
     } else {
         switch(message) {
         case CB_ADDSTRING:state->choices.emplace_back(reinterpret_cast<LPCWSTR>(lp));return state->choices.size()-1;
@@ -43,13 +68,66 @@ LRESULT CALLBACK ControlProc(HWND window,UINT message,WPARAM wp,LPARAM lp,UINT_P
     }
     return DefSubclassProc(window,message,wp,lp);
 }
-void Attach(HWND window,bool toggle) {
-    auto state=new State;state->toggle=toggle;
+State* ControlState(HWND window) {
+    DWORD_PTR data=0;
+    return GetWindowSubclass(window,ControlProc,1,&data)?reinterpret_cast<State*>(data):nullptr;
+}
+void Attach(HWND window,bool toggle,bool animated=false) {
+    auto state=new State;state->toggle=toggle;state->animated=animated;
     if(!SetWindowSubclass(window,ControlProc,1,reinterpret_cast<DWORD_PTR>(state)))delete state;
 }
 }
 void InitChoiceControl(HWND window) {Attach(window,false);}
-void InitToggleControl(HWND window) {Attach(window,true);}
+void InitToggleControl(HWND window,bool animated) {Attach(window,true,animated);}
+
+void ToggleChecked(HWND window) {
+    auto state=ControlState(window);if(!state||!state->toggle||!IsWindowEnabled(window))return;
+    state->from=Position(window,state);state->checked=!state->checked;
+    BOOL animations=TRUE;SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&animations,0);
+    if(state->animated&&animations&&IsWindowVisible(window)) {
+        state->started=GetTickCount64();state->animating=true;
+        if(!SetTimer(window,AnimationTimer,16,nullptr))FinishAnimation(window,state);
+    } else FinishAnimation(window,state);
+    InvalidateRect(window,nullptr,FALSE);
+}
+
+double ToggleVisualPosition(HWND window) {
+    auto state=ControlState(window);return state&&state->toggle?Position(window,state):0.;
+}
+
+void DrawSwitchControl(const DRAWITEMSTRUCT* item,HFONT font,UINT dpi) {
+    using namespace Gdiplus;
+    int width=item->rcItem.right-item->rcItem.left,height=item->rcItem.bottom-item->rcItem.top;
+    if(width<=0||height<=0)return;
+    HDC memory=CreateCompatibleDC(item->hDC);auto bitmap=CreateCompatibleBitmap(item->hDC,width,height);
+    if(!memory||!bitmap){if(memory)DeleteDC(memory);if(bitmap)DeleteObject(bitmap);return;}
+    auto oldBitmap=SelectObject(memory,bitmap);auto oldFont=SelectObject(memory,font);
+    RECT bounds{0,0,width,height};FillRect(memory,&bounds,static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
+    bool disabled=(item->itemState&ODS_DISABLED)!=0;
+    auto scale=[&](int value){return MulDiv(value,dpi,96);};
+    int length=GetWindowTextLengthW(item->hwndItem);std::wstring title(length+1,L'\0');GetWindowTextW(item->hwndItem,title.data(),length+1);
+    RECT label=bounds;label.right-=scale(56);SetBkMode(memory,TRANSPARENT);SetTextColor(memory,disabled?UiTheme::Muted:UiTheme::Ink);
+    DrawTextW(memory,title.c_str(),length,&label,DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS|DT_NOPREFIX);
+    double position=ToggleVisualPosition(item->hwndItem);
+    COLORREF off=RGB(210,220,218),on=disabled?RGB(135,181,175):UiTheme::Accent;
+    auto mix=[&](BYTE a,BYTE b){return static_cast<BYTE>(a+(b-a)*position+.5);};
+    {
+        Graphics graphics(memory);graphics.SetSmoothingMode(SmoothingModeAntiAlias);
+        graphics.SetPixelOffsetMode(PixelOffsetModeHighQuality);graphics.SetCompositingQuality(CompositingQualityHighQuality);
+        REAL unit=static_cast<REAL>(dpi)/96.f;
+        // Inset by one device pixel so antialiased edges are never clipped.
+        RectF track(width-44.f*unit-1.f,(height-24.f*unit)/2.f,44.f*unit,24.f*unit);
+        GraphicsPath capsule;
+        capsule.AddArc(track.X,track.Y,track.Height,track.Height,90.f,180.f);
+        capsule.AddArc(track.GetRight()-track.Height,track.Y,track.Height,track.Height,270.f,180.f);capsule.CloseFigure();
+        SolidBrush fill(Color(255,mix(GetRValue(off),GetRValue(on)),mix(GetGValue(off),GetGValue(on)),mix(GetBValue(off),GetBValue(on))));
+        graphics.FillPath(&fill,&capsule);
+        RectF thumb(track.X+(2.f+20.f*static_cast<REAL>(position))*unit,track.Y+2.f*unit,20.f*unit,20.f*unit);
+        SolidBrush white(Color(255,255,255,255));graphics.FillEllipse(&white,thumb);
+    }
+    BitBlt(item->hDC,item->rcItem.left,item->rcItem.top,width,height,memory,0,0,SRCCOPY);
+    SelectObject(memory,oldFont);SelectObject(memory,oldBitmap);DeleteObject(bitmap);DeleteDC(memory);
+}
 
 void ShowChoiceMenu(HWND owner,HWND control,HFONT font,UINT dpi) {
     if(!IsWindowEnabled(control))return;

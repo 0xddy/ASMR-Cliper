@@ -62,6 +62,7 @@ private:
     void selectHistory();
     void testNavigationRendering();
     void testControls();
+    void testSwitches();
     void testProgress();
     void testProgramMenu();
     void testDropdowns();

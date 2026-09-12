@@ -1,4 +1,7 @@
 #include "MainWindow.h"
+#include "UiControls.h"
+#include "UiTheme.h"
+#include <cmath>
 #include <commctrl.h>
 #include <algorithm>
 
@@ -252,5 +255,63 @@ void MainWindow::testControls() {
     history_[0]["speech_review"]["status"]="passed";updateHistory();check("passed review hides unresolved positions",!visible(ReviewFindings));
     bool passed=std::all_of(checks.begin(),checks.end(),[](const auto& row){return row.at("passed").template get<bool>();});
     WriteJson(std::filesystem::path(Wide(options_["test-controls"])),{{"passed",passed},{"checks",checks}});
+    completed_=passed;finishTest(passed?0:1);
+}
+
+void MainWindow::testSwitches() {
+    nlohmann::json checks=nlohmann::json::array();
+    auto check=[&](const char* name,bool passed){checks.push_back({{"name",name},{"passed",passed}});};
+    auto click=[&](int id){SendMessageW(control(id),BM_CLICK,0,0);};
+    auto pump=[&](DWORD milliseconds) {
+        auto until=GetTickCount64()+milliseconds;
+        do {
+            MSG message{};
+            while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessageW(&message);}
+            auto now=GetTickCount64();if(now>=until)break;
+            MsgWaitForMultipleObjects(0,nullptr,FALSE,static_cast<DWORD>(until-now),QS_ALLINPUT);
+        }while(true);
+    };
+    const auto folder=std::filesystem::path(Wide(options_["test-switches"])).parent_path();
+    cfg_["mode"]="relaxed";selectPage(3,0);enableControls(false);
+    // Exercise actual child timers without taking focus or showing a user window.
+    SetWindowPos(window_,nullptr,-32000,-32000,d(1100),d(800),SWP_NOZORDER|SWP_NOACTIVATE);ShowWindow(window_,SW_SHOWNOACTIVATE);
+    SendMessageW(control(FadeEnabled),BM_SETCHECK,BST_UNCHECKED,0);
+    check("programmatic initialization has no animation",ToggleVisualPosition(control(FadeEnabled))==0.);
+    screenshot(folder/L"switch-off.png");
+    BOOL animations=TRUE;SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&animations,0);
+    click(FadeEnabled);
+    check("switch state and dependent field update immediately",SendMessageW(control(FadeEnabled),BM_GETCHECK,0,0)==BST_CHECKED&&IsWindowEnabled(control(FadeSeconds)));
+    if(animations) {
+        pump(40);double middle=ToggleVisualPosition(control(FadeEnabled));
+        check("thumb passes through intermediate positions",middle>0.&&middle<1.);
+        screenshot(folder/L"switch-moving.png");
+        double before=ToggleVisualPosition(control(FadeEnabled));click(FadeEnabled);
+        check("rapid reversal starts at the current thumb position",std::abs(ToggleVisualPosition(control(FadeEnabled))-before)<.06&&SendMessageW(control(FadeEnabled),BM_GETCHECK,0,0)==BST_UNCHECKED);
+        pump(35);check("reversed thumb travels toward off",ToggleVisualPosition(control(FadeEnabled))<before);
+        pump(220);check("animation settles at exact off endpoint",ToggleVisualPosition(control(FadeEnabled))==0.);
+        click(FadeEnabled);pump(220);check("animation settles at exact on endpoint",ToggleVisualPosition(control(FadeEnabled))==1.);
+    } else check("system disabled animations are respected",ToggleVisualPosition(control(FadeEnabled))==1.);
+    screenshot(folder/L"switch-on.png");
+    for(UINT dpi:{96u,144u,192u}) {
+        int width=MulDiv(360,dpi,96),height=MulDiv(40,dpi,96);
+        HDC dc=GetDC(window_),memory=CreateCompatibleDC(dc);auto bitmap=CreateCompatibleBitmap(dc,width,height);auto old=SelectObject(memory,bitmap);
+        DRAWITEMSTRUCT draw{};draw.CtlType=ODT_BUTTON;draw.CtlID=FadeEnabled;draw.hwndItem=control(FadeEnabled);draw.hDC=memory;draw.rcItem={0,0,width,height};draw.itemState=ODS_FOCUS|ODS_SELECTED;
+        DrawSwitchControl(&draw,font_,dpi);
+        check("focused switch keeps white row background",GetPixel(memory,2,2)==UiTheme::White&&GetPixel(memory,width/2,2)==UiTheme::White);
+        int blended=0;
+        for(int x=width-MulDiv(48,dpi,96);x<width;++x)for(int y=0;y<height;++y){auto color=GetPixel(memory,x,y);if(color!=UiTheme::White&&color!=UiTheme::Accent)++blended;}
+        check("switch curves have antialiased edge pixels at each DPI",blended>10);
+        SelectObject(memory,old);DeleteObject(bitmap);DeleteDC(memory);ReleaseDC(window_,dc);
+    }
+    click(FadeEnabled);selectPage(3,1);
+    check("hidden switches finish animation without stale visuals",ToggleVisualPosition(control(FadeEnabled))==0.);
+    selectPage(3,0);click(FadeEnabled);enableControls(true);
+    check("disabled switches settle on the logical state",ToggleVisualPosition(control(FadeEnabled))==1.&&!IsWindowEnabled(control(FadeEnabled)));
+    enableControls(false);click(FadeEnabled);SendMessageW(control(FadeEnabled),BM_SETCHECK,BST_CHECKED,0);
+    check("programmatic reset cancels in-flight animation",ToggleVisualPosition(control(FadeEnabled))==1.);
+    bool soft=SendMessageW(control(KeepSoftLaugh),BM_GETCHECK,0,0)==BST_CHECKED;click(KeepSoftLaugh);
+    check("sound checkboxes retain immediate state changes",(SendMessageW(control(KeepSoftLaugh),BM_GETCHECK,0,0)==BST_CHECKED)==!soft&&ToggleVisualPosition(control(KeepSoftLaugh))==(!soft?1.:0.));
+    bool passed=std::all_of(checks.begin(),checks.end(),[](const auto& row){return row.at("passed").template get<bool>();});
+    WriteJson(std::filesystem::path(Wide(options_["test-switches"])),{{"passed",passed},{"checks",checks}});
     completed_=passed;finishTest(passed?0:1);
 }

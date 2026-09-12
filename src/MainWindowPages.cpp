@@ -40,7 +40,7 @@ const EnvironmentRow* EnvironmentRepair(int id) {for(const auto& row:Environment
 }
 
 bool MainWindow::testing() const {
-    return options_.contains("snapshot")||options_.contains("self-test")||options_.contains("test-job")||options_.contains("test-action")||options_.contains("test-navigation")||options_.contains("test-controls")||options_.contains("test-dropdowns")||options_.contains("test-progress")||options_.contains("test-menu");
+    return options_.contains("snapshot")||options_.contains("self-test")||options_.contains("test-job")||options_.contains("test-action")||options_.contains("test-navigation")||options_.contains("test-controls")||options_.contains("test-switches")||options_.contains("test-dropdowns")||options_.contains("test-progress")||options_.contains("test-menu");
 }
 
 void MainWindow::createControls() {
@@ -72,12 +72,12 @@ void MainWindow::createControls() {
     for(auto label:{L"Whisper large-v3",L"Qwen3-ASR-1.7B"})SendMessageW(control(ReviewChoice),CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label));
     button(SettingsAudio,3,L"剪辑与声音");button(SettingsRecognition,3,L"识别与成片");button(SettingsNetwork,3,L"网络下载");
     button(Save,3,L"保存当前分类");button(Reset,3,L"恢复本类默认");
-    button(MenuEnabled,31,L"成片节目单");InitToggleControl(control(MenuEnabled));
+    button(MenuEnabled,31,L"成片节目单");InitToggleControl(control(MenuEnabled),true);
     button(MenuModels,31,L"管理模型");
     button(AudioEncoding,31,L"");InitChoiceControl(control(AudioEncoding));
     for(auto label:{L"跟随源编码",L"FLAC · 无损压缩",L"PCM / WAV · 32 位浮点",L"AAC · 自动源码率"})SendMessageW(control(AudioEncoding),CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label));
-    button(FadeEnabled,30,L"片段接缝淡化");InitToggleControl(control(FadeEnabled));
-    button(EdgeFadeEnabled,30,L"成片首尾淡化");InitToggleControl(control(EdgeFadeEnabled));
+    button(FadeEnabled,30,L"片段接缝淡化");InitToggleControl(control(FadeEnabled),true);
+    button(EdgeFadeEnabled,30,L"成片首尾淡化");InitToggleControl(control(EdgeFadeEnabled),true);
     add(EdgeFadeSeconds,30,L"EDIT",L"",WS_TABSTOP|ES_AUTOHSCROLL);
     add(FadeSeconds,30,L"EDIT",L"",WS_TABSTOP|ES_AUTOHSCROLL);button(StrictDetails,30,L"展开参数");
     const wchar_t* sounds[]={L"轻笑",L"心跳",L"道具敲击",L"大笑",L"呼气/烟雾",L"喝水休息",L"掉落 / 撞击"};
@@ -88,8 +88,8 @@ void MainWindow::createControls() {
     for(auto label:{L"自动识别",L"韩语",L"日语",L"中文",L"英语"}) SendMessageW(control(Language),CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label));
     for(auto label:{L"自动选择",L"NVIDIA GPU",L"CPU"}) SendMessageW(control(Device),CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label));
     for(int id:{Silence,SilenceDb,Before,After,Minimum,DenseGap}) add(id,30,L"EDIT",L"",WS_TABSTOP|ES_AUTOHSCROLL);
-    button(Audit,31,L"成片人声复核");InitToggleControl(control(Audit));
-    button(ProxyEnabled,32,L"通过代理下载");InitToggleControl(control(ProxyEnabled));
+    button(Audit,31,L"成片人声复核");InitToggleControl(control(Audit),true);
+    button(ProxyEnabled,32,L"通过代理下载");InitToggleControl(control(ProxyEnabled),true);
     add(ProxyUrl,32,L"EDIT",L"",WS_TABSTOP|ES_AUTOHSCROLL);
     button(TestProxy,32,L"测试连接");
     add(Log,4,L"EDIT",L"",WS_TABSTOP|WS_VSCROLL|ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL);
@@ -98,7 +98,7 @@ void MainWindow::createControls() {
     add(Progress,-1,PROGRESS_CLASSW,L"",PBS_SMOOTH);SendMessageW(control(Progress),PBM_SETRANGE32,0,1000);SetWindowTheme(control(Progress),L"",L"");SendMessageW(control(Progress),PBM_SETBARCOLOR,0,Accent);SendMessageW(control(Progress),PBM_SETBKCOLOR,0,White);
     setFonts();populateSettings();updateHistory();enableControls(false);
     SendMessageW(window_,WM_CHANGEUISTATE,MAKEWPARAM(UIS_SET,UISF_HIDEFOCUS),0);
-    appendLog(L"ASMR-Cliper 0.6.10");
+    appendLog(L"ASMR-Cliper 0.6.11");
     selectPage(page_);
 }
 
@@ -256,7 +256,7 @@ void MainWindow::paint(HDC dc) {
     auto line=[&](int a,int y,int right) {auto pen=CreatePen(PS_SOLID,1,Line);auto old=SelectObject(dc,pen);MoveToEx(dc,d(a),d(y),nullptr);LineTo(dc,d(right),d(y));SelectObject(dc,old);DeleteObject(pen);};
     RECT side{0,0,d(200),b.bottom};FillRect(dc,&side,white_);
     auto icon=LoadIconW(instance_,MAKEINTRESOURCEW(101));if(icon)DrawIconEx(dc,d(22),d(32),icon,d(24),d(24),0,nullptr,DI_NORMAL);
-    label(L"ASMR-Cliper",54,28,142,32,brandFont_);label(L"v0.6.10",24,h-43,140,20,smallFont_,Muted);
+    label(L"ASMR-Cliper",54,28,142,32,brandFont_);label(L"v0.6.11",24,h-43,140,20,smallFont_,Muted);
     const wchar_t* titles[]={L"剪辑任务",L"处理记录",L"运行环境",L"偏好设置",L"运行日志"};label(titles[page_],x,24,cw-260,42,titleFont_);
     if(page_==0) {
         card(96,374);label(L"音频 / 视频文件",x+24,110,cw-48,24,font_);label(L"输出目录",x+24,194,cw-48,24,font_);
@@ -380,7 +380,7 @@ void MainWindow::drawButton(const DRAWITEMSTRUCT* item) {
         }return;
     }
     if(IsSoundOption(id)) {
-        auto brush=CreateSolidBrush(focus&&!disabled?Bg:White);FillRect(item->hDC,&r,brush);DeleteObject(brush);
+        FillRect(item->hDC,&r,white_);
         bool checked=SendMessageW(control(id),BM_GETCHECK,0,0)==BST_CHECKED;
         int y=(r.top+r.bottom)/2;RECT box{r.left+d(2),y-d(10),r.left+d(22),y+d(10)};
         auto ink=disabled?Muted:Accent;Rounded(item->hDC,box,checked?ink:White,checked?ink:Line,d(6));
@@ -388,14 +388,7 @@ void MainWindow::drawButton(const DRAWITEMSTRUCT* item) {
         r.left+=d(36);SelectObject(item->hDC,font_);SetTextColor(item->hDC,disabled?Muted:Ink);auto title=value(id);DrawTextW(item->hDC,title.c_str(),-1,&r,DT_LEFT|DT_VCENTER|DT_SINGLELINE);return;
     }
     bool toggle=id==Audit||id==ProxyEnabled||id==MenuEnabled||id==FadeEnabled||id==EdgeFadeEnabled;
-    if(toggle) {
-        auto brush=CreateSolidBrush(focus&&!disabled?Bg:White);FillRect(item->hDC,&r,brush);DeleteObject(brush);
-        RECT label=r;label.right-=d(56);SelectObject(item->hDC,id==Audit||id==MenuEnabled?boldFont_:font_);SetTextColor(item->hDC,disabled?Muted:Ink);auto title=value(id);DrawTextW(item->hDC,title.c_str(),-1,&label,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
-        bool checked=SendMessageW(control(id),BM_GETCHECK,0,0)==BST_CHECKED;
-        RECT track{r.right-d(44),r.top+(r.bottom-r.top-d(24))/2,r.right,r.top+(r.bottom-r.top+d(24))/2};
-        auto color=checked?(disabled?RGB(135,181,175):Accent):RGB(210,220,218);Rounded(item->hDC,track,color,color,d(24));
-        RECT dot{checked?track.right-d(22):track.left+d(2),track.top+d(2),checked?track.right-d(2):track.left+d(22),track.top+d(22)};Rounded(item->hDC,dot,White,White,d(20));return;
-    }
+    if(toggle) {DrawSwitchControl(item,id==Audit||id==MenuEnabled?boldFont_:font_,dpi_);return;}
     bool nav=id>=NavTask&&id<=NavLogs,tabs=id==SettingsAudio||id==SettingsRecognition||id==SettingsNetwork||id==EnvironmentBase||id==EnvironmentModels,mode=id==Strict||id==Relaxed||id==Extract,choice=id==Language||id==Device||id==SpeechChoice||id==ReviewChoice||id==OutputKind||id==AudioEncoding;
     bool selected=(id==Strict&&cfg_.value("mode","relaxed")=="strict")||(id==Relaxed&&cfg_.value("mode","relaxed")=="relaxed")||(id==Extract&&cfg_.value("mode","")=="extract")||(nav&&id-NavTask==page_)||(id==SettingsAudio&&settingsTab_==0)||(id==SettingsRecognition&&settingsTab_==1)||(id==SettingsNetwork&&settingsTab_==2)||(id==EnvironmentModels&&environmentTab_==1)||(id==EnvironmentBase&&environmentTab_==0);
     bool onCard=nav||tabs||choice||id==BrowseInput||id==BrowseOutput||id==Play||id==Mapping||id==OpenOutput||id==ReviewFindings||id==ProgramMenu||id==MenuModels||id==StrictDetails||id==NetworkSettings||id==TestProxy||EnvironmentRepair(id);

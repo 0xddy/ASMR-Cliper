@@ -667,7 +667,7 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
         if(id>=RepairQwen&&id<=RepairNeural){const char* keys[]={"qwen","aligner","clap","neural"};environmentTask("install",keys[id-RepairQwen]);return 0;}
         if(id==TestProxy) {environmentTask("testproxy");return 0;}
         if(id==ProxyEnabled||id==Audit||id==MenuEnabled||id==FadeEnabled||id==EdgeFadeEnabled||IsSoundOption(id)){
-            SendMessageW(control(id),BM_SETCHECK,SendMessageW(control(id),BM_GETCHECK,0,0)==BST_CHECKED?BST_UNCHECKED:BST_CHECKED,0);
+            ToggleChecked(control(id));
             if(id==ProxyEnabled){proxyTested_=false;proxyResults_=json::array();proxyStatus_.clear();if(activeAction_=="testproxy")notice_=false;}
             enableControls(busy_);return 0;
         }
@@ -760,6 +760,7 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
         else if(options_.contains("test-progress")) testProgress();
         else if(options_.contains("test-dropdowns")) testDropdowns();
         else if(options_.contains("test-controls")) testControls();
+        else if(options_.contains("test-switches")) testSwitches();
         else if(options_.contains("test-navigation")) testNavigationRendering();
         else if(options_.contains("test-job")) start(false);
         else if(options_.contains("self-test")) start(true);
