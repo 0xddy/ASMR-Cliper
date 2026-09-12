@@ -2,6 +2,8 @@
 
 本包保留 Python 压缩包中的许可文件、各 wheel 的 `.dist-info` 元数据与许可文件，以及 FFmpeg 的 `runtime/tools/FFmpeg-LICENSE.txt`。组件许可证各自适用。`build-info.json` 记录所使用的版本与下载校验值。
 
+安装脚本会对 nagisa 0.2.11 的 `model.py` 应用一处路径兼容补丁：导入时由 Python 临时进入内置模型目录，让 DyNet 使用 ASCII 文件名加载模型，再恢复原工作目录。这解决了 Windows 中文安装路径下的模型读取失败；模型权重保持原样，补丁源码位于 `scripts/neural_environment.py`。
+
 | 组件 | 上游 / 许可信息 |
 |---|---|
 | Python | https://www.python.org/ / https://docs.python.org/3/license.html |

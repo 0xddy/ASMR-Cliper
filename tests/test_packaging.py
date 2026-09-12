@@ -105,8 +105,12 @@ class PackagingTests(unittest.TestCase):
         self.put('runtime/downloads/ffmpeg-essentials.zip', b'FFmpeg archive')
         manager, neural = Mock(), Mock()
         # Extracting neural Python replaces its bundled CRT; install must restore the VS set.
-        neural.install.side_effect = lambda *args, **kwargs: self.put(
-            'runtime/neural/vcruntime140.dll', b'older embedded CRT')
+        def install_neural(*args, prepare_runtime, **kwargs):
+            self.put('runtime/neural/vcruntime140.dll', b'older embedded CRT')
+            prepare_runtime(self.root / 'runtime/neural')
+            for dll in crt.glob('*.dll'):
+                self.assertEqual((self.root / 'runtime/neural' / dll.name).read_bytes(), dll.read_bytes())
+        neural.install.side_effect = install_neural
         copy_file = shutil.copy2
 
         def copy_unlocked(source, target):

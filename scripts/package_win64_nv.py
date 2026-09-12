@@ -157,15 +157,13 @@ def install(root, crt):
         manager.CONFIG.update(proxy_enabled=True, proxy_url=proxy)
     manifest = read(root / 'config/environment.json')
     # Core CRT was staged by prepare, before this interpreter loaded and locked its DLLs.
-    copy_crt(crt, root / 'runtime/neural')
     # Neither environment inherits a system pip index/cache configuration.
     env = clean_env(root)
     manager.child_environment = lambda for_download=True: clean_env(root, offline=not for_download)
     manager.install_dependencies(manifest)
     # Hosted runners have no NVIDIA device; never infer which torch wheel to install from GPU detection.
-    neural_environment.install(root, manifest, manager.file_download, extract_checked, manager.emit, env, use_cuda=True)
-    # Embedded Python also contains a CRT DLL; restore the complete matching VS redistributable set.
-    copy_crt(crt, root / 'runtime/neural')
+    neural_environment.install(root, manifest, manager.file_download, extract_checked, manager.emit, env,
+                               use_cuda=True, prepare_runtime=lambda folder: copy_crt(crt, folder))
     manager.install_ffmpeg(manifest)
     for asset in assets(manifest):
         print('Model: ' + asset['path'], flush=True)
