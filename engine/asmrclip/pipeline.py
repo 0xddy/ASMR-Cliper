@@ -3,7 +3,7 @@ import gc
 import os
 from pathlib import Path
 
-from .common import configure_dlls, event, fingerprint, read_json, save_json, settings
+from .common import configure_dlls, event, fingerprint, merge, read_json, save_json, settings
 from .progress import tracked, phase, scope
 from .task_cache import cache_lock, begin as begin_cache, finish as finish_cache, maintain
 
@@ -74,18 +74,24 @@ def run(data):
         phase(3, '准备声音分类模型')
         classifier=Classifier(cfg,pcm,cache)
         resources.callback(classifier.close)
-        with scope('背景音乐检查',0,.25):
+        with scope('背景音乐检查',0,.15):
             music=classifier.music_intervals(meta['analysis_duration'])
-        with scope('人声、休息与突兀声音检查',.25,.5):
+        with scope('人声、休息与突兀声音检查',.15,.4):
             exclusions=classifier.exclusions(speech,music,meta['analysis_duration'])
         from .semantic import confirm,SoundMatcher
         from .transitions import review_transitions
+        from .drinking import review_drinking
+        classifier.close()
         with SoundMatcher(cfg,pcm,cache) as matcher:
-            with scope('音色中断检查',.5,.75 if cfg['mode']=='extract' else 1.):
+            with scope('饮水与瓶盖动作检查',.4,.65):
+                drinks,exclusions['drinking_review']=review_drinking(
+                    cfg,pcm,cache,matcher,speech,music,exclusions,meta['analysis_duration'])
+                exclusions['drinking']=merge(exclusions.get('drinking',[])+drinks)
+            with scope('音色中断检查',.65,.85 if cfg['mode']=='extract' else 1.):
                 exclusions['transitions'],exclusions['transition_review']=review_transitions(
                     cfg,pcm,cache,classifier,matcher,speech,music,exclusions,meta['analysis_duration'])
             if cfg['mode']=='extract':
-                with scope('ASMR 片段确认',.75,1.):
+                with scope('ASMR 片段确认',.85,1.):
                     exclusions['extraction']=confirm(cfg,pcm,cache,classifier,speech,music,exclusions,meta['analysis_duration'],matcher)
                 exclusions['extraction'].pop('records',None)
         save_json(cache/'exclusions-latest.json',exclusions)

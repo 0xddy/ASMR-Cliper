@@ -48,7 +48,7 @@ class TaskCacheTests(unittest.TestCase):
     def test_completed_job_cleans_ai_artifacts_and_preserves_results_models_and_unknown_files(self):
         task = self.task()
         names = ['frames.npz', 'source-audio.mp4', 'analysis.part.wav', 'speech-a' + '0' * 11 + '.jsonl',
-                 'acoustic-cache.json', 'semantic-cache.json.tmp', 'extraction-evidence.json',
+                 'acoustic-cache.json', 'semantic-cache.json.tmp', 'extraction-evidence.json', 'drinking-review.json',
                  'plan-extract.json', 'review-results/' + 'a' * 64 + '.json',
                  'review-results/chunks/' + 'b' * 64 + '.json', 'inference-test/audio.npy']
         for name in names:
@@ -175,6 +175,7 @@ class TaskCacheTests(unittest.TestCase):
              patch('asmrclip.recognition.Recognizer', return_value=recognizer), \
              patch('asmrclip.classifier.Classifier', return_value=classifier), \
              patch('asmrclip.transitions.review_transitions', return_value=([], {'candidates': []})), \
+             patch('asmrclip.drinking.review_drinking', return_value=([], {'candidates': []})), \
              patch('asmrclip.planner.make_plan', side_effect=RuntimeError('planning interrupted')):
             with self.assertRaisesRegex(RuntimeError, 'planning interrupted'):
                 run({**self.cfg, 'input': str(source), 'review_enabled': False, 'generate_program_menu': False})

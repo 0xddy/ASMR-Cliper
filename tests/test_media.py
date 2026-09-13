@@ -164,6 +164,7 @@ class MediaExportTests(unittest.TestCase):
         with patch('asmrclip.model_catalog.validate_models'),patch('asmrclip.reviewer.validate_review_model'),\
              patch('asmrclip.recognition.Recognizer',return_value=recognizer),patch('asmrclip.classifier.Classifier',return_value=classifier),\
              patch('asmrclip.semantic.confirm',return_value={}),patch('asmrclip.reviewer.Reviewer',return_value=reviewer),\
+             patch('asmrclip.drinking.review_drinking',return_value=([],{'candidates':[]})),\
              patch('asmrclip.planner.make_plan',side_effect=make_plan),\
              patch('asmrclip.media.video_groups',wraps=video_groups) as indexing,\
              patch('asmrclip.media.copy_media_packets',wraps=copy_media_packets) as copying,\

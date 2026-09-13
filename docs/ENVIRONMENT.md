@@ -80,6 +80,8 @@ ASMR-Cliper 的「运行环境」页使用与命令行相同的环境管理器�
 | aligner | Qwen3-ForcedAligner-0.6B | 约 1.71 GiB |
 | clap | CLAP HTSAT unfused | 约 0.58 GiB |
 
+V2 / V3 未勾选「喝水休息」时，饮水语义复核需要 `clap` 和 `neural`；V4 始终需要。组件列表及「补齐环境」按当前选项计算必需组件，缺少时先补齐再开始分析。
+
 `neural` 安装到 `runtime/neural/python.exe`，使用独立嵌入式 Python 3.12、PyTorch 2.9.1 和最小推理依赖；GPU 版本从 PyTorch 官方 CUDA 12.8 源安装，CPU 电脑使用 CPU 包。CUDA PyTorch 下载约 2.86 GB，另有其他依赖。不会升级核心引擎的 NumPy、Transformers 或 ONNX Runtime。Qwen 的网页演示、服务和 vLLM 依赖不参与本程序推理。
 
 可单独运行 `scripts/environment.ps1 -Action install -Component qwen`，会同时补齐定位模型与依赖；`-Component clap` 会补齐 CLAP 和独立依赖。程序检测已安装文件的大小、SHA-256、依赖版本及实际导入。音频推理只使用本地文件，关闭 Hugging Face 联网加载；环境检测不触发模型推理。

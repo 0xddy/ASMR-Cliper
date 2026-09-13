@@ -16,7 +16,7 @@ def required_components(cfg):
         if name not in VOICE_MODELS:raise ValueError('未知语音模型：'+str(name))
         required.add(VOICE_MODELS[name]['component'])
         if name=='qwen3-asr':required.update(('aligner','neural'))
-    if cfg.get('mode')=='extract':required.update(('clap','neural'))
+    if cfg.get('mode')=='extract' or not cfg.get('keep_drinking',False):required.update(('clap','neural'))
     return required
 
 

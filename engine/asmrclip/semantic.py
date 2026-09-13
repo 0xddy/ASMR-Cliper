@@ -32,7 +32,26 @@ PROMPTS={
   'The sound of breathing, sighing and exhaling air.',
   'The sound of music playing in the background.',
   'The sound of quiet room noise, hum and silence.',
-  'The sound of an electronic buzzing or static noise.']}
+  'The sound of an electronic buzzing or static noise.'],
+ # Independent descriptions for drink-break verification. They do not turn
+ # bottle handling, water or mouth sounds alone into exclusion evidence.
+ 'bottle_cap':[
+  'The sound of unscrewing a plastic cap from a water bottle.',
+  'The sound of opening a bottle, twisting and cracking the screw cap.',
+  'The sound of screwing a lid back onto a plastic water bottle.'],
+ 'drinking':[
+  'The sound of a person drinking water from a bottle and swallowing.',
+  'The sound of taking a sip of water from a cup, gulping and swallowing.',
+  'The sound of someone gulping a drink with wet liquid sounds.'],
+ 'swallow':[
+  'The sound of swallowing water, a wet gulp in the throat.',
+  'The sound of a person slurping and drinking water.'],
+ 'handling':[
+  'The sound of rubbing and squeezing plastic objects.',
+  'The sound of crinkling a plastic bag or wrapper.'],
+ 'water':[
+  'The sound of water pouring, bubbling and splashing.',
+  'The sound of gentle water movements for ASMR.']}
 
 
 def semantic_scores(scores):

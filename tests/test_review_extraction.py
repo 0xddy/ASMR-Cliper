@@ -141,7 +141,14 @@ class ReviewExtractionTests(unittest.TestCase):
                 def inspect(self,path,report):
                     assert len(decode_review_audio(path))>1000
                     return {'status':'passed','findings':[],'candidate_payload_sha256':report['payload_sha256']}
+            drink_report={'status':'checked','removed':[[.2,.5]],'candidates':[
+                {'start':.2,'end':.5,'decision':'remove','reason':'饮水和相邻瓶盖证据'},
+                {'start':3.,'end':4.,'decision':'uncertain','reason':'未确认'}]}
+            plan['acoustic_exclusions']={'drinking_review':drink_report}
             report=export(source,out,meta,frames,plan,cfg,fingerprint(source),Approve())
+            self.assertEqual(report['drinking_review'],drink_report)
+            saved=(Path(report['output']).parent/'饮水复核.csv').read_text('utf-8-sig')
+            self.assertIn('原片分析开始',saved);self.assertIn('确认饮水休息',saved);self.assertIn('未确认，不据此删除',saved)
             self.assertFalse(report['payload_unchanged']);self.assertEqual(len(report['audio_fades']['edges']),2)
             self.assertEqual(report['speech_review']['candidate_payload_sha256'],report['payload_sha256'])
             self.assertTrue(Path(report['output']).name.endswith('_v4.m4a'))
@@ -169,6 +176,8 @@ class ReviewExtractionTests(unittest.TestCase):
                     recognizer=MagicMock();recognizer.scan.return_value={'spoken':[],'language':'en'}
                     classifier=MagicMock();classifier.music_intervals.return_value=[]
                     classifier.exclusions.return_value={key:[] for key in ('voice','soft_laugh','heartbeat','tapping','loud_laugh','airflow','drinking','impacts')}
+                    classifier.exclusions.return_value['drinking']=[[.3,.5]]
+                    drinks={'status':'checked','removed':[[.4,.7]],'candidates':[]}
                     reviewer=MagicMock()
                     reviewer.inspect.side_effect=lambda path,report:{'status':'speech_found',
                         'findings':[{'start':.2,'end':.4,'text':'possible speech'}],
@@ -176,10 +185,15 @@ class ReviewExtractionTests(unittest.TestCase):
                     plans=[dict(base),{**base,'keep_frames':[]} if empty else dict(base)]
                     with patch('asmrclip.model_catalog.validate_models'),patch('asmrclip.reviewer.validate_review_model'), \
                          patch('asmrclip.recognition.Recognizer',return_value=recognizer),patch('asmrclip.classifier.Classifier',return_value=classifier), \
-                         patch('asmrclip.semantic.confirm',return_value={}),patch('asmrclip.reviewer.Reviewer',return_value=reviewer), \
+                         patch('asmrclip.semantic.confirm',return_value={}) as extraction,patch('asmrclip.reviewer.Reviewer',return_value=reviewer), \
                          patch('asmrclip.transitions.review_transitions',return_value=([],{'candidates':[]})), \
-                         patch('asmrclip.planner.make_plan',side_effect=plans),contextlib.redirect_stdout(io.StringIO()) as output:
+                         patch('asmrclip.drinking.review_drinking',return_value=([[.4,.7]],drinks)), \
+                         patch('asmrclip.planner.make_plan',side_effect=plans) as planning,contextlib.redirect_stdout(io.StringIO()) as output:
                         report=run(cfg)
+                    for call in planning.call_args_list:
+                        self.assertEqual(call.args[6]['drinking'],[[.3,.7]])
+                        self.assertEqual(call.args[6]['drinking_review'],drinks)
+                    if mode=='extract':self.assertEqual(extraction.call_args.args[6]['drinking'],[[.3,.7]])
                     self.assertTrue(Path(report['output']).is_file())
                     self.assertFalse(report['payload_unchanged']);self.assertEqual(len(report['audio_fades']['edges']),2);self.assertTrue(report['decode_verified'])
                     self.assertEqual(report['speech_review']['status'],'needs_review')
