@@ -124,7 +124,7 @@ void MainWindow::createControls() {
     setFonts();populateSettings();updateHistory();enableControls(false);
     settingsReady_=true;
     SendMessageW(window_,WM_CHANGEUISTATE,MAKEWPARAM(UIS_SET,UISF_HIDEFOCUS),0);
-    appendLog(L"ASMR-Cliper 0.6.21");
+    appendLog(L"ASMR-Cliper 0.6.22");
     selectPage(page_);
 }
 
@@ -233,7 +233,7 @@ void MainWindow::layout() {
         if(SendMessageW(control(id),EM_GETMARGINS,0,0)!=0)SendMessageW(control(id),EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(0,0));
     };
     for(int i=0;i<5;++i)place(NavTask+i,16,112+52*i,168,44);
-    place(OpenGithub,100,h-49,84,32);
+    place(OpenGithub,16,h-49,104,32);
     field(Input,x+24,142,cw-184);place(BrowseInput,r-144,142,120,40);
     field(Output,x+24,226,cw-184);place(BrowseOutput,r-144,226,120,40);
     place(OutputKind,x+24,310,236,40);
@@ -321,7 +321,7 @@ void MainWindow::paint(HDC dc) {
     auto line=[&](int a,int y,int right) {auto pen=CreatePen(PS_SOLID,1,Line);auto old=SelectObject(dc,pen);MoveToEx(dc,d(a),d(y),nullptr);LineTo(dc,d(right),d(y));SelectObject(dc,old);DeleteObject(pen);};
     RECT side{0,0,d(200),b.bottom};FillRect(dc,&side,white_);
     auto icon=LoadIconW(instance_,MAKEINTRESOURCEW(101));if(icon)DrawIconEx(dc,d(22),d(32),icon,d(24),d(24),0,nullptr,DI_NORMAL);
-    label(L"ASMR-Cliper",54,28,142,32,brandFont_);label(L"v0.6.21",24,h-43,70,20,smallFont_,Muted);
+    label(L"ASMR-Cliper",54,28,142,32,brandFont_);
     const wchar_t* titles[]={L"剪辑任务",L"处理记录",L"运行环境",L"偏好设置",L"运行日志"};label(titles[page_],x,24,cw-260,42,titleFont_);
     if(page_==0) {
         card(96,374);label(L"音频 / 视频文件",x+24,110,cw-48,24,font_);label(L"输出目录",x+24,194,cw-48,24,font_);
@@ -436,11 +436,10 @@ void MainWindow::drawButtonContent(const DRAWITEMSTRUCT* item) {
     SetBkMode(item->hDC,TRANSPARENT);
     if(id==OpenGithub) {
         FillRect(item->hDC,&r,white_);
-        const bool keyboardFocus=focus&&!(SendMessageW(item->hwndItem,WM_QUERYUISTATE,0,0)&UISF_HIDEFOCUS);
-        COLORREF color=GetPropW(item->hwndItem,GithubHot)||keyboardFocus||(item->itemState&ODS_SELECTED)?Accent:Muted;
-        DrawGithubMark(item->hDC,static_cast<float>(r.left+d(6)),(r.top+r.bottom-d(18))/2.f,static_cast<float>(d(18)),color);
+        COLORREF color=GetPropW(item->hwndItem,GithubHot)||focus||(item->itemState&ODS_SELECTED)?Accent:Muted;
+        DrawGithubMark(item->hDC,static_cast<float>(r.left+d(8)),(r.top+r.bottom-d(16))/2.f,static_cast<float>(d(16)),color);
         r.left+=d(32);SelectObject(item->hDC,smallFont_);SetTextColor(item->hDC,color);
-        DrawTextW(item->hDC,L"开源",-1,&r,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
+        DrawTextW(item->hDC,L"v0.6.22",-1,&r,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
         return;
     }
     if(id==History) {

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(ASMRCLIP VERSION 0.6.21 LANGUAGES CXX RC)
+project(ASMRCLIP VERSION 0.6.22 LANGUAGES CXX RC)
 if(NOT WIN32)
   message(FATAL_ERROR "This GUI currently targets Windows 10/11 x64.")
 endif()
