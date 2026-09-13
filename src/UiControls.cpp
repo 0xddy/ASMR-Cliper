@@ -4,6 +4,7 @@
 #include <objidl.h>
 #include <gdiplus.h>
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -25,7 +26,7 @@ struct ChoiceItem {
 constexpr UINT_PTR AnimationTimer=0xAC11;
 constexpr double AnimationDuration=180.;
 struct State {
-    bool toggle=false,checked=false,animated=false,animating=false;
+    bool toggle=false,checked=false,animated=false,animating=false,hot=false;
     double position=0.,from=0.;ULONGLONG started=0;
     int selection=-1;std::vector<std::wstring> choices;
 };
@@ -45,12 +46,17 @@ LRESULT CALLBACK ControlProc(HWND window,UINT message,WPARAM wp,LPARAM lp,UINT_P
     auto state=reinterpret_cast<State*>(data);
     if(message==WM_NCDESTROY) {KillTimer(window,AnimationTimer);RemoveWindowSubclass(window,ControlProc,subclass);delete state;return DefSubclassProc(window,message,wp,lp);}
     if(state->toggle) {
+        if(message==WM_MOUSEMOVE&&IsWindowEnabled(window)&&!state->hot) {
+            state->hot=true;TRACKMOUSEEVENT tracking{sizeof(tracking),TME_LEAVE,window,0};TrackMouseEvent(&tracking);
+            InvalidateRect(window,nullptr,FALSE);
+        }
+        if(message==WM_MOUSELEAVE) {state->hot=false;InvalidateRect(window,nullptr,FALSE);}
         if(message==BM_GETCHECK)return state->checked?BST_CHECKED:BST_UNCHECKED;
         if(message==BM_SETCHECK) {state->checked=wp==BST_CHECKED;FinishAnimation(window,state);InvalidateRect(window,nullptr,FALSE);return 0;}
         if(message==WM_TIMER&&wp==AnimationTimer) {Position(window,state);InvalidateRect(window,nullptr,FALSE);return 0;}
         if(((message==WM_SHOWWINDOW||message==WM_ENABLE)&&!wp)||
            (message==WM_WINDOWPOSCHANGED&&(reinterpret_cast<WINDOWPOS*>(lp)->flags&SWP_HIDEWINDOW))) {
-            FinishAnimation(window,state);InvalidateRect(window,nullptr,FALSE);
+            state->hot=false;FinishAnimation(window,state);InvalidateRect(window,nullptr,FALSE);
         }
     } else {
         switch(message) {
@@ -107,6 +113,66 @@ void ToggleChecked(HWND window) {
 
 double ToggleVisualPosition(HWND window) {
     auto state=ControlState(window);return state&&state->toggle?Position(window,state):0.;
+}
+
+void DrawCheckboxControl(const DRAWITEMSTRUCT* item,HFONT font,UINT dpi) {
+    using namespace Gdiplus;
+    // The owner provides one buffered surface for the entire row. Fractional
+    // geometry keeps the outline and round-ended tick smooth at fractional DPI.
+    HDC dc=item->hDC;RECT row=item->rcItem;
+    FillRect(dc,&row,static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
+    auto state=ControlState(item->hwndItem);
+    bool disabled=(item->itemState&ODS_DISABLED)!=0;
+    bool hot=!disabled&&state&&state->hot;
+    bool pressed=!disabled&&(item->itemState&ODS_SELECTED)!=0;
+    bool focused=!disabled&&(item->itemState&ODS_FOCUS)&&!(item->itemState&ODS_NOFOCUSRECT);
+    REAL unit=static_cast<REAL>(dpi)/96.f;
+    double position=ToggleVisualPosition(item->hwndItem);
+    auto color=[](COLORREF value) {return Color(255,GetRValue(value),GetGValue(value),GetBValue(value));};
+    auto blend=[](COLORREF a,COLORREF b,double amount) {
+        auto channel=[&](int x,int y){return static_cast<BYTE>(x+(y-x)*amount+.5);};
+        return RGB(channel(GetRValue(a),GetRValue(b)),channel(GetGValue(a),GetGValue(b)),channel(GetBValue(a),GetBValue(b)));
+    };
+    COLORREF on=disabled?RGB(159,187,183):pressed?RGB(0,91,84):hot?RGB(0,108,100):UiTheme::Accent;
+    COLORREF off=disabled?RGB(246,248,248):(hot||pressed)?RGB(239,247,245):UiTheme::White;
+    COLORREF outline=disabled?RGB(215,225,224):(hot||focused||pressed)?RGB(65,141,132):RGB(180,199,195);
+    {
+        Graphics graphics(dc);graphics.SetSmoothingMode(SmoothingModeAntiAlias);
+        graphics.SetPixelOffsetMode(PixelOffsetModeHighQuality);graphics.SetCompositingQuality(CompositingQualityHighQuality);
+        REAL size=(pressed?18.f:19.f)*unit,centerX=row.left+12.f*unit,centerY=(row.top+row.bottom)/2.f;
+        RectF box(centerX-size/2.f,centerY-size/2.f,size,size);
+        REAL radius=4.5f*unit,diameter=2.f*radius;
+        GraphicsPath shape;
+        shape.AddArc(box.X,box.Y,diameter,diameter,180.f,90.f);
+        shape.AddArc(box.GetRight()-diameter,box.Y,diameter,diameter,270.f,90.f);
+        shape.AddArc(box.GetRight()-diameter,box.GetBottom()-diameter,diameter,diameter,0.f,90.f);
+        shape.AddArc(box.X,box.GetBottom()-diameter,diameter,diameter,90.f,90.f);shape.CloseFigure();
+        double fillAmount=std::min(1.,position*1.6);
+        SolidBrush fill(color(blend(off,on,fillAmount)));
+        Pen border(color(blend(outline,on,fillAmount)),1.15f*unit);
+        graphics.FillPath(&fill,&shape);graphics.DrawPath(&border,&shape);
+        // Reveal the short then long stroke along its actual path; reversing
+        // a click retraces the same path without moving the label or hit area.
+        REAL progress=static_cast<REAL>(std::clamp((position-.18)/.82,0.,1.));
+        if(progress>0.f) {
+            REAL tickUnit=unit*(pressed?18.f/19.f:1.f);
+            PointF a(centerX-4.7f*tickUnit,centerY+.1f*tickUnit);
+            PointF b(centerX-1.3f*tickUnit,centerY+3.3f*tickUnit);
+            PointF c(centerX+5.f*tickUnit,centerY-3.5f*tickUnit);
+            REAL first=std::hypot(b.X-a.X,b.Y-a.Y),second=std::hypot(c.X-b.X,c.Y-b.Y),length=(first+second)*progress;
+            GraphicsPath tick;PointF end;
+            if(length<=first) {end={a.X+(b.X-a.X)*length/first,a.Y+(b.Y-a.Y)*length/first};tick.AddLine(a,end);}
+            else {tick.AddLine(a,b);REAL part=(length-first)/second;end={b.X+(c.X-b.X)*part,b.Y+(c.Y-b.Y)*part};tick.AddLine(b,end);}
+            Pen pen(Color(static_cast<BYTE>(255*std::min(1.,position*2.)),255,255,255),1.9f*unit);
+            pen.SetStartCap(LineCapRound);pen.SetEndCap(LineCapRound);pen.SetLineJoin(LineJoinRound);
+            graphics.DrawPath(&pen,&tick);
+        }
+    }
+    auto oldFont=SelectObject(dc,font);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,disabled?UiTheme::Muted:UiTheme::Ink);
+    RECT label=row;label.left+=MulDiv(36,dpi,96);
+    int length=GetWindowTextLengthW(item->hwndItem);std::wstring title(length+1,L'\0');GetWindowTextW(item->hwndItem,title.data(),length+1);
+    DrawTextW(dc,title.c_str(),length,&label,DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS|DT_NOPREFIX);
+    SelectObject(dc,oldFont);
 }
 
 void DrawSwitchControl(const DRAWITEMSTRUCT* item,HFONT font,UINT dpi) {

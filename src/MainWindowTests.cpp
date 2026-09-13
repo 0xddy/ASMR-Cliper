@@ -437,8 +437,51 @@ void MainWindow::testSwitches() {
     check("disabled switches settle on the logical state",ToggleVisualPosition(control(FadeEnabled))==1.&&!IsWindowEnabled(control(FadeEnabled)));
     enableControls(false);click(FadeEnabled);SendMessageW(control(FadeEnabled),BM_SETCHECK,BST_CHECKED,0);
     check("programmatic reset cancels in-flight animation",ToggleVisualPosition(control(FadeEnabled))==1.);
-    bool soft=SendMessageW(control(KeepSoftLaugh),BM_GETCHECK,0,0)==BST_CHECKED;click(KeepSoftLaugh);
-    check("sound checkboxes retain immediate state changes",(SendMessageW(control(KeepSoftLaugh),BM_GETCHECK,0,0)==BST_CHECKED)==!soft&&ToggleVisualPosition(control(KeepSoftLaugh))==(!soft?1.:0.));
+    HWND checkbox=control(KeepSoftLaugh);SendMessageW(checkbox,BM_SETCHECK,BST_UNCHECKED,0);
+    click(KeepSoftLaugh);
+    check("checkbox value and setting update before animation finishes",SendMessageW(checkbox,BM_GETCHECK,0,0)==BST_CHECKED&&cfg_["keep_soft_laugh"]==true);
+    if(animations) {
+        pump(35);double middle=ToggleVisualPosition(checkbox);
+        check("checkbox tick has an intermediate reveal",middle>0.&&middle<1.);
+        ToggleChecked(checkbox);double reversed=ToggleVisualPosition(checkbox);
+        check("checkbox reversal continues from its current appearance",std::abs(reversed-middle)<.06);
+        pump(220);check("checkbox reversal completes",ToggleVisualPosition(checkbox)==0.);
+    } else check("checkbox respects disabled system animations",ToggleVisualPosition(checkbox)==1.);
+    SendMessageW(checkbox,BM_SETCHECK,BST_UNCHECKED,0);
+    SendMessageW(checkbox,WM_KEYDOWN,VK_SPACE,0);SendMessageW(checkbox,WM_KEYUP,VK_SPACE,0);pump(220);
+    check("Space toggles and saves the checkbox",SendMessageW(checkbox,BM_GETCHECK,0,0)==BST_CHECKED&&cfg_["keep_soft_laugh"]==true);
+    for(UINT dpi:{96u,120u,144u,192u,240u}) {
+        auto scale=[&](int n){return MulDiv(n,dpi,96);};int width=scale(200),height=scale(40);
+        HDC dc=GetDC(window_),memory=CreateCompatibleDC(dc);auto bitmap=CreateCompatibleBitmap(dc,width,height);auto old=SelectObject(memory,bitmap);
+        DRAWITEMSTRUCT draw{};draw.CtlType=ODT_BUTTON;draw.CtlID=KeepSoftLaugh;draw.hwndItem=checkbox;draw.hDC=memory;draw.rcItem={0,0,width,height};draw.itemState=ODS_FOCUS;
+        DrawCheckboxControl(&draw,font_,dpi);
+        check("focused checkbox leaves label row background white",GetPixel(memory,scale(30),2)==UiTheme::White&&GetPixel(memory,width-2,height-2)==UiTheme::White);
+        int blended=0,tick=0;
+        for(int x=0;x<scale(25);++x)for(int y=0;y<height;++y) {
+            auto color=GetPixel(memory,x,y);
+            if(color!=UiTheme::White&&color!=UiTheme::Accent)++blended;
+            if(x>=scale(5)&&x<=scale(18)&&std::abs(y-height/2)<scale(5)&&color==UiTheme::White)++tick;
+        }
+        check("checkbox outline and tick are antialiased at each DPI",blended>10&&tick>=3);
+        auto normal=GetPixel(memory,scale(7),height/2-scale(4));
+        draw.itemState=ODS_DISABLED;DrawCheckboxControl(&draw,font_,dpi);
+        check("disabled checked box has a distinct muted fill",GetPixel(memory,scale(7),height/2-scale(4))!=normal);
+        SendMessageW(checkbox,BM_SETCHECK,BST_UNCHECKED,0);draw.itemState=0;DrawCheckboxControl(&draw,font_,dpi);
+        auto idle=GetPixel(memory,scale(12),height/2);
+        SendMessageW(checkbox,WM_MOUSEMOVE,0,MAKELPARAM(d(60),d(20)));DrawCheckboxControl(&draw,font_,dpi);
+        check("hover feedback stays inside checkbox",GetPixel(memory,scale(12),height/2)!=idle&&GetPixel(memory,scale(30),2)==UiTheme::White);
+        SendMessageW(checkbox,WM_MOUSELEAVE,0,0);DrawCheckboxControl(&draw,font_,dpi);
+        check("leaving the checkbox restores the idle appearance",GetPixel(memory,scale(12),height/2)==idle);
+        SendMessageW(checkbox,BM_SETCHECK,BST_CHECKED,0);
+        SelectObject(memory,old);DeleteObject(bitmap);DeleteDC(memory);ReleaseDC(window_,dc);
+    }
+    screenshot(folder/L"checkbox-on.png");
+    click(KeepSoftLaugh);selectPage(3,1);check("hidden checkbox animation settles",ToggleVisualPosition(checkbox)==0.);
+    selectPage(3,0);click(KeepSoftLaugh);EnableWindow(checkbox,FALSE);
+    check("disabled checkbox settles and cannot toggle",ToggleVisualPosition(checkbox)==1.);
+    ToggleChecked(checkbox);check("disabled checkbox preserves its value",SendMessageW(checkbox,BM_GETCHECK,0,0)==BST_CHECKED);
+    EnableWindow(checkbox,TRUE);click(KeepSoftLaugh);SendMessageW(checkbox,BM_SETCHECK,BST_CHECKED,0);
+    check("checkbox reset stops animation immediately",ToggleVisualPosition(checkbox)==1.);
     bool passed=std::all_of(checks.begin(),checks.end(),[](const auto& row){return row.at("passed").template get<bool>();});
     WriteJson(std::filesystem::path(Wide(options_["test-switches"])),{{"passed",passed},{"checks",checks}});
     completed_=passed;finishTest(passed?0:1);

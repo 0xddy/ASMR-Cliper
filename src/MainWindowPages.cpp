@@ -82,7 +82,7 @@ void MainWindow::createControls() {
     add(FadeSeconds,30,L"EDIT",L"",WS_TABSTOP|ES_AUTOHSCROLL);button(StrictDetails,30,L"展开参数");
     const wchar_t* sounds[]={L"轻笑",L"轻语 / 耳语",L"心跳",L"道具敲击",L"大笑",L"呼气/烟雾",L"喝水休息",L"掉落 / 撞击"};
     int soundIndex=0;
-    for(auto [id,key]:SoundOptions){button(id,30,sounds[soundIndex++]);InitToggleControl(control(id));}
+    for(auto [id,key]:SoundOptions){button(id,30,sounds[soundIndex++]);InitToggleControl(control(id),true);}
     button(Language,31,L"");InitChoiceControl(control(Language));
     button(Device,31,L"");InitChoiceControl(control(Device));
     for(auto label:{L"自动识别",L"韩语",L"日语",L"中文",L"英语"}) SendMessageW(control(Language),CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label));
@@ -99,7 +99,7 @@ void MainWindow::createControls() {
     setFonts();populateSettings();updateHistory();enableControls(false);
     settingsReady_=true;
     SendMessageW(window_,WM_CHANGEUISTATE,MAKEWPARAM(UIS_SET,UISF_HIDEFOCUS),0);
-    appendLog(L"ASMR-Cliper 0.6.17");
+    appendLog(L"ASMR-Cliper 0.6.18");
     selectPage(page_);
 }
 
@@ -293,7 +293,7 @@ void MainWindow::paint(HDC dc) {
     auto line=[&](int a,int y,int right) {auto pen=CreatePen(PS_SOLID,1,Line);auto old=SelectObject(dc,pen);MoveToEx(dc,d(a),d(y),nullptr);LineTo(dc,d(right),d(y));SelectObject(dc,old);DeleteObject(pen);};
     RECT side{0,0,d(200),b.bottom};FillRect(dc,&side,white_);
     auto icon=LoadIconW(instance_,MAKEINTRESOURCEW(101));if(icon)DrawIconEx(dc,d(22),d(32),icon,d(24),d(24),0,nullptr,DI_NORMAL);
-    label(L"ASMR-Cliper",54,28,142,32,brandFont_);label(L"v0.6.17",24,h-43,140,20,smallFont_,Muted);
+    label(L"ASMR-Cliper",54,28,142,32,brandFont_);label(L"v0.6.18",24,h-43,140,20,smallFont_,Muted);
     const wchar_t* titles[]={L"剪辑任务",L"处理记录",L"运行环境",L"偏好设置",L"运行日志"};label(titles[page_],x,24,cw-260,42,titleFont_);
     if(page_==0) {
         card(96,374);label(L"音频 / 视频文件",x+24,110,cw-48,24,font_);label(L"输出目录",x+24,194,cw-48,24,font_);
@@ -427,12 +427,7 @@ void MainWindow::drawButtonContent(const DRAWITEMSTRUCT* item) {
         }return;
     }
     if(IsSoundOption(id)) {
-        FillRect(item->hDC,&r,white_);
-        bool checked=SendMessageW(control(id),BM_GETCHECK,0,0)==BST_CHECKED;
-        int y=(r.top+r.bottom)/2;RECT box{r.left+d(2),y-d(10),r.left+d(22),y+d(10)};
-        auto ink=disabled?Muted:Accent;Rounded(item->hDC,box,checked?ink:White,checked?ink:Line,d(6));
-        if(checked){auto pen=CreatePen(PS_SOLID,d(2),White);auto old=SelectObject(item->hDC,pen);MoveToEx(item->hDC,box.left+d(5),y,nullptr);LineTo(item->hDC,box.left+d(9),y+d(4));LineTo(item->hDC,box.right-d(4),y-d(4));SelectObject(item->hDC,old);DeleteObject(pen);}
-        r.left+=d(36);SelectObject(item->hDC,font_);SetTextColor(item->hDC,disabled?Muted:Ink);auto title=value(id);DrawTextW(item->hDC,title.c_str(),-1,&r,DT_LEFT|DT_VCENTER|DT_SINGLELINE);return;
+        DrawCheckboxControl(item,font_,dpi_);return;
     }
     bool nav=id>=NavTask&&id<=NavLogs,tabs=id==SettingsAudio||id==SettingsRecognition||id==SettingsNetwork||id==EnvironmentBase||id==EnvironmentModels,mode=id==Strict||id==Relaxed||id==Extract,choice=id==Language||id==Device||id==SpeechChoice||id==ReviewChoice||id==OutputKind||id==AudioEncoding;
     bool selected=(id==Strict&&cfg_.value("mode","relaxed")=="strict")||(id==Relaxed&&cfg_.value("mode","relaxed")=="relaxed")||(id==Extract&&cfg_.value("mode","")=="extract")||(nav&&id-NavTask==page_)||(id==SettingsAudio&&settingsTab_==0)||(id==SettingsRecognition&&settingsTab_==1)||(id==SettingsNetwork&&settingsTab_==2)||(id==EnvironmentModels&&environmentTab_==1)||(id==EnvironmentBase&&environmentTab_==0);
