@@ -20,6 +20,7 @@ SOURCE_FILES = (
     'docs/ENVIRONMENT.md', 'docs/模式提示词.md',
     'docs/prompts/strict-v2.txt', 'docs/prompts/relaxed-v3.txt', 'docs/prompts/extract-v4.txt',
     'third_party/nlohmann/LICENSE.MIT',
+    'third_party/octicons/LICENSE.MIT',
 )
 TOOL_FILES = ('ffmpeg.exe', 'ffprobe.exe', 'FFmpeg-LICENSE.txt', 'FFmpeg-README.txt')
 

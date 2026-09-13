@@ -741,6 +741,11 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
         if(HIWORD(wp)==CBN_SELCHANGE&&IsSettingsChoice(id)){autoSaveSetting(id);InvalidateRect(window_,nullptr,FALSE);return 0;}
         if(id==History&&HIWORD(wp)==LBN_SELCHANGE) {selectHistory();return 0;}
         if(HIWORD(wp)!=BN_CLICKED) break;
+        if(id==OpenGithub) {
+            auto result=ShellExecuteW(window_,L"open",L"https://github.com/0xddy/ASMR-Cliper",nullptr,nullptr,SW_SHOWNORMAL);
+            if(reinterpret_cast<INT_PTR>(result)<=32)showText(L"GitHub 开源项目",L"无法打开浏览器，请访问：\r\nhttps://github.com/0xddy/ASMR-Cliper");
+            return 0;
+        }
         if(id>=NavTask&&id<=NavLogs) {selectPage(id-NavTask);return 0;}
         if(id==SettingsAudio||id==SettingsNetwork||id==SettingsRecognition) {selectPage(3,id==SettingsNetwork?2:id==SettingsRecognition?1:0);return 0;}
         if(id==StrictDetails){strictExpanded_=!strictExpanded_;layout();return 0;}

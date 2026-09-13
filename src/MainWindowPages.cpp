@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "UiControls.h"
 #include "UiTheme.h"
+#include "GithubMark.h"
 #include <uxtheme.h>
 #include <commctrl.h>
 #include <algorithm>
@@ -9,6 +10,20 @@
 namespace fs = std::filesystem;
 namespace {
 using namespace UiTheme;
+constexpr wchar_t GithubHot[] = L"ASMRCliper.GithubHot";
+LRESULT CALLBACK GithubLinkProc(HWND window,UINT message,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR) {
+    if(message==WM_SETCURSOR&&LOWORD(lp)==HTCLIENT) {SetCursor(LoadCursorW(nullptr,IDC_HAND));return TRUE;}
+    if(message==WM_MOUSEMOVE&&!GetPropW(window,GithubHot)) {
+        SetPropW(window,GithubHot,reinterpret_cast<HANDLE>(1));
+        TRACKMOUSEEVENT tracking{sizeof(tracking),TME_LEAVE,window,0};TrackMouseEvent(&tracking);
+        InvalidateRect(window,nullptr,FALSE);
+    }
+    if(message==WM_MOUSELEAVE||(message==WM_SHOWWINDOW&&!wp)) {
+        RemovePropW(window,GithubHot);InvalidateRect(window,nullptr,FALSE);
+    }
+    if(message==WM_NCDESTROY) {RemovePropW(window,GithubHot);RemoveWindowSubclass(window,GithubLinkProc,id);}
+    return DefSubclassProc(window,message,wp,lp);
+}
 void Rounded(HDC dc,RECT r,COLORREF fill,COLORREF border,int radius=14) {
     auto b=CreateSolidBrush(fill);auto p=CreatePen(PS_SOLID,1,border);
     auto oldB=SelectObject(dc,b);auto oldP=SelectObject(dc,p);
@@ -51,6 +66,16 @@ void MainWindow::createControls() {
     };
     auto button=[&](int id,int group,const wchar_t* label) {InitPaintControl(add(id,group,L"BUTTON",label,WS_TABSTOP|BS_OWNERDRAW));};
     button(NavTask,-1,L"剪辑任务");button(NavHistory,-1,L"处理记录");button(NavEnvironment,-1,L"运行环境");button(NavSettings,-1,L"偏好设置");button(NavLogs,-1,L"运行日志");
+    button(OpenGithub,-1,L"GitHub · 开源项目");
+    SetWindowSubclass(control(OpenGithub),GithubLinkProc,3,0);
+    auto tooltip=CreateWindowExW(WS_EX_TOPMOST,TOOLTIPS_CLASSW,nullptr,WS_POPUP|TTS_ALWAYSTIP|TTS_NOPREFIX,
+        CW_USEDEFAULT,CW_USEDEFAULT,CW_USEDEFAULT,CW_USEDEFAULT,window_,nullptr,instance_,nullptr);
+    if(tooltip) {
+        TOOLINFOW info{sizeof(info)};info.uFlags=TTF_IDISHWND|TTF_SUBCLASS;info.hwnd=window_;
+        info.uId=reinterpret_cast<UINT_PTR>(control(OpenGithub));
+        info.lpszText=const_cast<LPWSTR>(L"GitHub · 查看 ASMR-Cliper 源代码");
+        SendMessageW(tooltip,TTM_ADDTOOLW,0,reinterpret_cast<LPARAM>(&info));
+    }
     add(Input,0,L"EDIT",Wide(cfg_["input"]),WS_TABSTOP|ES_AUTOHSCROLL);
     add(Output,0,L"EDIT",Wide(cfg_["output_dir"]),WS_TABSTOP|ES_AUTOHSCROLL);
     button(BrowseInput,0,L"选择文件");button(BrowseOutput,0,L"更改目录");
@@ -99,7 +124,7 @@ void MainWindow::createControls() {
     setFonts();populateSettings();updateHistory();enableControls(false);
     settingsReady_=true;
     SendMessageW(window_,WM_CHANGEUISTATE,MAKEWPARAM(UIS_SET,UISF_HIDEFOCUS),0);
-    appendLog(L"ASMR-Cliper 0.6.20");
+    appendLog(L"ASMR-Cliper 0.6.21");
     selectPage(page_);
 }
 
@@ -208,6 +233,7 @@ void MainWindow::layout() {
         if(SendMessageW(control(id),EM_GETMARGINS,0,0)!=0)SendMessageW(control(id),EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,MAKELPARAM(0,0));
     };
     for(int i=0;i<5;++i)place(NavTask+i,16,112+52*i,168,44);
+    place(OpenGithub,100,h-49,84,32);
     field(Input,x+24,142,cw-184);place(BrowseInput,r-144,142,120,40);
     field(Output,x+24,226,cw-184);place(BrowseOutput,r-144,226,120,40);
     place(OutputKind,x+24,310,236,40);
@@ -229,11 +255,11 @@ void MainWindow::layout() {
     }
     const int tabWidth=(cw-16)/3;
     place(SettingsAudio,x+4,98,tabWidth,36);place(SettingsRecognition,x+8+tabWidth,98,tabWidth,36);place(SettingsNetwork,x+12+2*tabWidth,98,cw-16-2*tabWidth,36);
-    const int half=(cw-16)/2,right=x+half+16,small=(half-56)/2;
+    const int half=(cw-16)/2,right=x+half+16,columnWidth=(half-56)/2;
     int soundRow=0;for(auto [id,key]:SoundOptions) {
-        place(id,x+24+(soundRow%2)*(small+8),244+(soundRow/2)*44,small,38);++soundRow;
+        place(id,x+24+(soundRow%2)*(columnWidth+8),244+(soundRow/2)*44,columnWidth,38);++soundRow;
     }
-    field(Silence,right+24,238,small);field(SilenceDb,right+32+small,238,small);
+    field(Silence,right+24,238,columnWidth);field(SilenceDb,right+32+columnWidth,238,columnWidth);
     place(FadeEnabled,right+24,322,half-180,40);field(FadeSeconds,r-140,322,116);
     place(EdgeFadeEnabled,right+24,378,half-180,40);field(EdgeFadeSeconds,r-140,378,116);
     place(StrictDetails,r-140,486,116,36);text(StrictDetails,strictExpanded_?L"收起参数":L"展开参数");
@@ -295,7 +321,7 @@ void MainWindow::paint(HDC dc) {
     auto line=[&](int a,int y,int right) {auto pen=CreatePen(PS_SOLID,1,Line);auto old=SelectObject(dc,pen);MoveToEx(dc,d(a),d(y),nullptr);LineTo(dc,d(right),d(y));SelectObject(dc,old);DeleteObject(pen);};
     RECT side{0,0,d(200),b.bottom};FillRect(dc,&side,white_);
     auto icon=LoadIconW(instance_,MAKEINTRESOURCEW(101));if(icon)DrawIconEx(dc,d(22),d(32),icon,d(24),d(24),0,nullptr,DI_NORMAL);
-    label(L"ASMR-Cliper",54,28,142,32,brandFont_);label(L"v0.6.20",24,h-43,140,20,smallFont_,Muted);
+    label(L"ASMR-Cliper",54,28,142,32,brandFont_);label(L"v0.6.21",24,h-43,70,20,smallFont_,Muted);
     const wchar_t* titles[]={L"剪辑任务",L"处理记录",L"运行环境",L"偏好设置",L"运行日志"};label(titles[page_],x,24,cw-260,42,titleFont_);
     if(page_==0) {
         card(96,374);label(L"音频 / 视频文件",x+24,110,cw-48,24,font_);label(L"输出目录",x+24,194,cw-48,24,font_);
@@ -332,15 +358,15 @@ void MainWindow::paint(HDC dc) {
         }
     } else if(page_==3) {
         Rounded(dc,{d(x),d(94),d(r),d(138)},White,Line,d(14));
-        int half=(cw-16)/2,right=x+half+16,small=(half-56)/2;
+        int half=(cw-16)/2,right=x+half+16,columnWidth=(half-56)/2;
         if(settingsTab_==0) {
             Rounded(dc,{d(x),d(158),d(x+half),d(458)},White,Line,d(16));
             Rounded(dc,{d(right),d(158),d(r),d(458)},White,Line,d(16));
             label(L"保留声音",x+24,174,half-48,28,boldFont_);
             label(L"勾选表示保留 · 普通说话仍删除",x+24,210,half-48,22,smallFont_,Muted);
             label(L"停顿与淡化",right+24,174,half-48,28,boldFont_);
-            label(L"最长空窗期（秒）",right+24,210,small,22,smallFont_,Muted);
-            label(L"静音电平（dB）",right+32+small,210,small,22,smallFont_,Muted);
+            label(L"最长空窗期（秒）",right+24,210,columnWidth,22,smallFont_,Muted);
+            label(L"静音电平（dB）",right+32+columnWidth,210,columnWidth,22,smallFont_,Muted);
             line(right+24,292,r-24);label(L"每侧时长（秒）",r-140,298,116,22,smallFont_,Muted);
             label(L"开启任一淡化会重新编码音轨",right+24,432,half-48,22,smallFont_,Muted);
             card(474,strictExpanded_?630:534);label(L"严格模式 V2 参数",x+24,488,cw-200,28,boldFont_);
@@ -408,6 +434,15 @@ void MainWindow::drawButton(const DRAWITEMSTRUCT* item) {
 void MainWindow::drawButtonContent(const DRAWITEMSTRUCT* item) {
     int id=static_cast<int>(item->CtlID);RECT r=item->rcItem;bool focus=(item->itemState&ODS_FOCUS)!=0,disabled=(item->itemState&ODS_DISABLED)!=0;
     SetBkMode(item->hDC,TRANSPARENT);
+    if(id==OpenGithub) {
+        FillRect(item->hDC,&r,white_);
+        const bool keyboardFocus=focus&&!(SendMessageW(item->hwndItem,WM_QUERYUISTATE,0,0)&UISF_HIDEFOCUS);
+        COLORREF color=GetPropW(item->hwndItem,GithubHot)||keyboardFocus||(item->itemState&ODS_SELECTED)?Accent:Muted;
+        DrawGithubMark(item->hDC,static_cast<float>(r.left+d(6)),(r.top+r.bottom-d(18))/2.f,static_cast<float>(d(18)),color);
+        r.left+=d(32);SelectObject(item->hDC,smallFont_);SetTextColor(item->hDC,color);
+        DrawTextW(item->hDC,L"开源",-1,&r,DT_LEFT|DT_VCENTER|DT_SINGLELINE);
+        return;
+    }
     if(id==History) {
         bool selected=(item->itemState&ODS_SELECTED)!=0;auto brush=CreateSolidBrush(White);FillRect(item->hDC,&r,brush);DeleteObject(brush);
         if(selected)Rounded(item->hDC,r,Soft,Soft,d(12));int index=static_cast<int>(item->itemID);
