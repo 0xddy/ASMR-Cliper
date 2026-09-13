@@ -17,12 +17,16 @@ def dense_conversations(episodes):
             group.append([c,d])
         span = group[-1][1]-a
         spoken = sum(d-c for c,d in group)
-        if (len(group)>=4 and span<=135) or (len(group)>=3 and spoken>=20) or (len(group)>=2 and spoken>=35 and spoken/max(span,1)>=.3):
+        # A few brief interjections across two minutes are not dense chatting.
+        # A count-only rule chains sparse detections (including ASR artifacts)
+        # into very long deletions, especially after final-review retries.
+        density=spoken/max(span,1)
+        if (len(group)>=4 and span<=135 and spoken>=8 and density>=.15) or (len(group)>=3 and spoken>=20) or (len(group)>=2 and spoken>=35 and density>=.3):
             dense.append([a,group[-1][1]])
     return merge(dense,25)
 
 
-def scene_guard(probes, edge, side):
+def scene_guard(probes, edge, side, tail_limit=None):
     guard, reason = edge, []
     for p in probes:
         if p.get('retained_whisper') and not strong_voice(p):
@@ -38,6 +42,9 @@ def scene_guard(probes, edge, side):
         if (breath>.045 and breath>texture*1.5) or (voice>.45 and texture<.075 and not laugh_kind(p)):
             guard = p['end'] if side == 'start' else p['start']
             reason.append('避开与话语相连的呼吸或发声尾音')
+            if tail_limit is not None:
+                guard=min(guard,edge+tail_limit) if side=='start' else max(guard,edge-tail_limit)
+                break
     return guard, reason
 
 
@@ -49,6 +56,7 @@ def make_plan(meta, frames, speech, music, cfg, classifier=None, exclusions=None
     wide = 20*np.log10(np.maximum(maximum_filter1d(rms,size=9,mode='nearest'),1e-10))
     active_db = cfg['silence_db']+6
     review, rejected = [], []
+    faded_boundaries=cfg.get('join_fade_enabled',False) and cfg.get('edge_fade_enabled',True)
     from .whispering import allowed,subtract
     whispers=allowed(cfg,exclusions or {})
     spoken = subtract(merge(speech['spoken']+(exclusions or {}).get('voice',[]),.65),whispers)
@@ -73,6 +81,18 @@ def make_plan(meta, frames, speech, music, cfg, classifier=None, exclusions=None
         if side=='end' and edge>=duration:
             return n,'file_edge'
         pos = int(np.clip(math.ceil(edge/dt) if side=='start' else math.floor(edge/dt),0,n-1))
+        if faded_boundaries:
+            # With actual fades available, searching tens of seconds for the
+            # quietest point is unnecessary. Keep each search in its own
+            # quarter of the guarded interval so both ends cannot converge on
+            # the same central pause and erase a whole ASMR passage.
+            reach=min(round(2/dt),max(1,(bounds[1]-bounds[0])//4))
+            lo=max(bounds[0],pos-reach) if side=='end' else max(bounds[0],pos)
+            hi=min(bounds[1]-1,pos) if side=='end' else min(bounds[1]-1,pos+reach)
+            if hi<lo:return int(np.clip(pos,bounds[0],bounds[1]-1)),'local_gesture_trough'
+            candidates=np.arange(lo,hi+1)
+            score=np.maximum(wide[candidates],-60)+abs(candidates-pos)*dt*1.5
+            return int(candidates[np.argmin(score)]),'local_gesture_trough'
         available = max(1,(bounds[1]-bounds[0])//2)
         choices = []
         for reach in sorted(set([min(round(s/dt),available) for s in [18,36,72]]+[available])):
@@ -101,7 +121,8 @@ def make_plan(meta, frames, speech, music, cfg, classifier=None, exclusions=None
         return int(candidates[np.argmin(score)]),'local_gesture_trough'
 
     if cfg['mode']=='strict':
-        episodes=subtract(merge([[s['start'],s['end']] for s in speech['accepted']]+spoken,1.5),whispers)
+        from .recognition import word_intervals
+        episodes=subtract(merge(word_intervals(speech['accepted'])+spoken,1.5),whispers)
         dense=dense_conversations(episodes)
         removed=merge([[max(0,a-cfg['strict_pre']),min(duration,b+cfg['strict_post'])] for a,b in episodes+dense],cfg['strict_dense_gap'])
         blocked=[[strict_cut(a,'end'),strict_cut(b,'start')] for a,b in removed]
@@ -128,13 +149,24 @@ def make_plan(meta, frames, speech, music, cfg, classifier=None, exclusions=None
         units=[]
         for a,b,index,count in sections:
             starts,ends=probes[index:index+count],probes[index+count:index+count*2]
-            ga,ra=scene_guard(starts,a,'start') if a>0 else (a,[])
-            gb,rb=scene_guard(ends,b,'end') if b<duration else (b,[])
+            tail_limit=min(2.,(b-a)/10) if faded_boundaries else None
+            ga,ra=scene_guard(starts,a,'start',tail_limit) if a>0 else (a,[])
+            gb,rb=scene_guard(ends,b,'end',tail_limit) if b<duration else (b,[])
             bounds=(math.ceil(a/dt),min(n,math.floor(b/dt)))
+            if faded_boundaries:bounds=(max(bounds[0],math.ceil(ga/dt)),min(bounds[1],math.floor(gb/dt)))
+            if bounds[1]<=bounds[0]:
+                rejected.append({'raw_start':a,'raw_end':b,'start':ga,'end':gb,'reason':'话语上下文占满可用区间','context':ra+rb})
+                continue
             start,ks=event_cut(ga,'start',bounds)
             end,ke=event_cut(gb,'end',bounds)
             good_start=ks in ('natural_pause','file_edge') or (ks=='local_gesture_trough' and wide[start]<-46)
             good_end=ke in ('natural_pause','file_edge') or (ke=='local_gesture_trough' and wide[min(end,n-1)]<-46)
+            if faded_boundaries:
+                # A continuous sound need not dip below a fixed -46 dB to
+                # provide a usable cut. When all exposed edges will be faded,
+                # a local gesture trough can provide a smooth boundary.
+                good_start=good_start or ks=='local_gesture_trough'
+                good_end=good_end or ke=='local_gesture_trough'
             activity=db[start:end]>active_db if end>start else np.array([],bool)
             gestures=binary_closing(activity,structure=np.ones(7,bool)) if len(activity) else activity
             spans=np.flatnonzero(np.diff(np.r_[False,gestures,False])).reshape(-1,2)

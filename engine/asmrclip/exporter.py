@@ -167,14 +167,13 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
     output_dir.mkdir(parents=True,exist_ok=True)
     token=uuid.uuid4().hex[:8]
     staging=output_dir/f'.asmrclip-{token}.part'
-    staging.mkdir()
     mode={'strict':'v2','relaxed':'v3','extract':'v4'}[cfg['mode']]
     title={'strict':'严格模式（V2）','relaxed':'宽松模式（V3）','extract':'提取模式（V4）'}[cfg['mode']]
     source=Path(source)
-    name=source.stem[:100]
-    final_dir=output_dir/f'{name}_{mode}_{datetime.now():%Y%m%d_%H%M%S}_{token}'
     extension=output_extension(media,cfg)
-    filename=f'{name}_ASMR_{mode}{extension}'
+    from .output_paths import export_names
+    final_dir,filename=export_names(output_dir,source.stem,mode,datetime.now().strftime('%Y%m%d_%H%M%S'),token,extension)
+    staging.mkdir()
     raw_audio=staging/('source-audio'+media["extension"])
     processed_audio=staging/('audio-review'+extension if media["kind"]=='video' else filename)
     try:
@@ -209,6 +208,11 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
             review=reviewer.inspect(candidate or staging/filename,report)
             from .whispering import apply_review
             review=apply_review(review,plan,report,cfg)
+            # New words found by Qwen must also agree with the actual sound;
+            # whisper permissions and ASMR conflicts are not ordinary speech.
+            from .review_sounds import verify as verify_sounds
+            if hasattr(reviewer,'close'):reviewer.close()
+            review=verify_sounds(candidate or staging/filename,review,cfg)
             review['export_mapping']=report['mapping']
             if review['status']!='passed':
                 if review['status']!='speech_found':
@@ -217,7 +221,7 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
                 if allow_review_findings or not mapped:
                     review['status']='needs_review'
                     review['note']='仍有模型疑似话语，成片已保存；请在处理记录中查看待复听位置。'
-                    if not mapped:review['note']+=' 疑似位置无法映射为可调整的源片段，保留当前候选。'
+                    if not mapped:review['note']+=' 时间定位或话语证据不足以自动删除，保留当前候选。'
                 else:raise SpeechRemaining(review)
         elif cfg.get('review_enabled',False) or cfg['mode']=='extract':
             raise RuntimeError('请求了成片复核，但复核模型未运行，不能发布结果。')
@@ -271,6 +275,8 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
         report['whisper_review']=plan.get('acoustic_exclusions',{}).get('whisper_review',{})
         from .whispering import output_intervals
         report['whisper_retained']=output_intervals(plan,report,cfg)
+        from .common import merge
+        report['whisper_retained']=merge(report['whisper_retained']+[[r['start'],r['end']] for r in review.get('allowed_whisper',[])])
         if fingerprint(source)!=source_fingerprint:
             raise RuntimeError('处理期间源文件发生变化，请重新开始。')
         with (staging/'剪辑时间对照.csv').open('w',encoding='utf-8-sig',newline='') as f:
@@ -293,8 +299,8 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
             for row in report['audio_fades']['edges']:
                 writer.writerow(['开头淡入' if row['kind']=='fade_in' else '结尾淡出',clock(row['start']),clock(row['end']),row['seconds']])
         with (staging/'人声复核.csv').open('w',encoding='utf-8-sig',newline='') as f:
-            writer=csv.writer(f);writer.writerow(['成片开始','成片结束','模型疑似文字','状态'])
-            for s in report['speech_review'].get('findings',[]):writer.writerow([clock(s['start']),clock(s['end']),s['text'],'待复听'])
+            writer=csv.writer(f);writer.writerow(['成片开始','成片结束','模型疑似文字','状态','依据'])
+            for s in report['speech_review'].get('findings',[]):writer.writerow([clock(s['start']),clock(s['end']),s['text'],'待复听',s.get('reason','')])
         with (staging/'过渡复核.csv').open('w',encoding='utf-8-sig',newline='') as f:
             writer=csv.writer(f);writer.writerow(['原片分析开始','原片分析结束','检测判定','依据'])
             labels={'remove':'确认中断残留','keep_asmr':'存在声音动作','uncertain':'未确认，不据此删除'}

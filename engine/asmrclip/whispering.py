@@ -32,7 +32,9 @@ def acoustic_candidate(r):
 def positive(r):
     s=r.get('semantic',{});whisper=r.get('whisper',0)
     rival=max(s.get(k,0) for k in ('normal_speech','mouth','surface','tapping','heartbeat','break','other'))
-    return (not r.get('quiet') and whisper>=.25 and whisper>=r.get('voiced',0)*1.2
+    style=(whisper>=.25 and whisper>=r.get('voiced',0)*1.2) or (
+        r.get('whisper_context',False) and r.get('voiced',0)<.35)
+    return (not r.get('quiet') and style
             and max(r.get(k,0) for k in ('expressive','impact','loud_laugh'))<.25
             and s.get('whisper_asmr',0)>=.23 and s['whisper_asmr']-rival>=.025)
 
@@ -59,7 +61,7 @@ def confirmed_regions(rows,regions):
 
 
 def detect(cfg,pcm,cache,classifier,matcher,music,duration):
-    report={'version':1,'status':'disabled','intervals':[],'evidence':[]}
+    report={'version':2,'status':'disabled','intervals':[],'evidence':[]}
     if not cfg.get('keep_whisper',True):return [],report
     if not matcher.available():raise RuntimeError('保留轻语 / 耳语需要 CLAP 声音模型，请先补齐运行环境。')
     from .progress import scope,advance
@@ -68,19 +70,28 @@ def detect(cfg,pcm,cache,classifier,matcher,music,duration):
         coarse=classifier.windows([(float(t),min(float(t+10),b)) for a,b in available
                                    for t in np.arange(a,b,5) if b-t>=2])
     seeds=[r for r in coarse if acoustic_candidate(r)]
-    regions=merge([[max(a,r['start']-3),min(b,r['end']+3)] for r in seeds
-                   for a,b in available if a<=r['start']<b])
-    with scope('确认轻语与普通说话的边界',.35,.6):
+    # AST is trained on a roughly ten-second context. Zero-padding tiny
+    # whisper crops erases its style evidence. Confirm that context with CLAP,
+    # then use fine acoustic vetoes and repeated fine semantic evidence for
+    # boundaries; context alone never grants the entire window permission.
+    classifier.close()
+    with scope('确认轻语上下文',.35,.5):
+        contexts=matcher.score(seeds,lambda done,total:advance(done,total,'轻语上下文'),
+                               required_keys=('whisper_asmr','normal_speech'))
+    regions=merge([[r['start'],r['end']] for r in contexts if positive(r)])
+    matcher.close()
+    with scope('确认轻语与普通说话的边界',.5,.65):
         fine=classifier.windows([(float(t),float(t+3)) for a,b in regions
                                  for t in np.arange(a,b-3+1e-6,1)])
     classifier.close()
-    with scope('核对轻语声音证据',.6,1):
-        rows=matcher.score([r for r in fine if acoustic_candidate(r)],
+    with scope('核对轻语声音证据',.65,1):
+        rows=matcher.score([{**r,'whisper_context':True} for r in fine if not r.get('quiet')],
                            lambda done,total:advance(done,total,'轻语窗口'),required_keys=('whisper_asmr','normal_speech'))
     scored={(r['start'],r['end']):r for r in rows}
     checked=[scored.get((r['start'],r['end']),r) for r in fine]
     kept,evidence=confirmed_regions(checked,regions)
-    report.update(status='checked',intervals=kept,evidence=evidence,coarse_windows=len(coarse),fine_windows=len(fine))
+    report.update(status='checked',intervals=kept,evidence=evidence,coarse_windows=len(coarse),fine_windows=len(fine),
+                  confirmed_contexts=regions)
     save_json(cache/'whisper-review.json',report)
     event('log',f'轻语 / 耳语保留检查：确认 {len(kept)} 段；普通说话及未确认话语继续排除。')
     return kept,report

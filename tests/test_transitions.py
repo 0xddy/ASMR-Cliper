@@ -216,7 +216,9 @@ class SharedSoundMatcherTests(unittest.TestCase):
         scored=matcher.score.call_args.args[0]
         self.assertTrue(scored)
         self.assertFalse(any(r.get('quiet') for r in scored))
-        self.assertFalse(any(min(r['end'],25)>max(r['start'],20) for r in scored))
+        # Classification may see surrounding context; exported evidence must
+        # still remove the actual interruption interval.
+        self.assertTrue(any(min(r['end'],25)>max(r['start'],20) for r in scored))
         self.assertFalse(any(min(b,25)>max(a,20) for a,b in report['intervals']))
 
 

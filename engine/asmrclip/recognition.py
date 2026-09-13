@@ -1,6 +1,7 @@
 import dataclasses
 import hashlib
 import json
+import math
 import re
 from bisect import bisect_right
 from pathlib import Path
@@ -72,9 +73,35 @@ def word_intervals(segments):
 def qwen_speech(s):
     # Qwen does not expose Whisper-style word probabilities. Do not invent
     # confidence values; use lexical output and actual alignment validity.
+    return qwen_lexical(s) and not qwen_alignment_issue(s)
+
+
+def qwen_lexical(s):
     clean=re.sub(r'[\W_]+','',s.get('text',''))
-    return (bool(clean) and not NONLEX.fullmatch(clean) and not GENERIC.search(s.get('text',''))
-            and s['end']>s['start'] and bool(s.get('words')))
+    return bool(clean) and not NONLEX.fullmatch(clean) and not GENERIC.search(s.get('text',''))
+
+
+def qwen_alignment_issue(s):
+    """Forced alignment locates supplied text; it does not confirm it exists.
+
+    Reject collapsed/partial alignments as automatic deletion evidence. Keep
+    their text for listening review instead of expanding a few invalid ticks
+    into minutes of deleted context. No fabricated confidence probabilities.
+    """
+    words=s.get('words') or []
+    a,b=s.get('start',0),s.get('end',0)
+    if not words or not all(math.isfinite(v) for v in (a,b)) or b<=a:
+        return '话语时间定位无效'
+    valid=[w for w in words if all(math.isfinite(w.get(k,0)) for k in ('start','end')) and w['end']>w['start']]
+    total=s.get('alignment_total_words',len(words))
+    if len(valid)<total*.6:return '多数词的时间定位塌缩'
+    if any(w['end']-w['start']>max(6.,len(re.sub(r'[\W_]+','',w.get('word','')))*1.5) for w in valid):
+        return '单个短词被错误延长到多个秒段'
+    clean=re.sub(r'[\W_]+','',s.get('text',''))
+    covered=sum(d-c for c,d in merge([[w['start'],w['end']] for w in valid]))
+    if b-a<.18 or len(clean)/max(covered,1e-6)>30:
+        return '识别文字与定位时长不匹配'
+    return ''
 
 
 def Recognizer(cfg):
@@ -208,6 +235,8 @@ class WhisperRecognizer:
             for key in ['vad_segments', 'continuous_segments']:
                 for s in row[key]:
                     if plausible(s,vad,key=='continuous_segments'): accepted.append(s)
+                    elif s.get('backend')=='qwen3-asr' and qwen_lexical(s):
+                        uncertain.append({**s,'review_only':True,'reason':qwen_alignment_issue(s)})
                     elif s['end']>s['start'] and s.get('avg_logprob',-9)>-1.85 and not GENERIC.search(s['text']): uncertain.append(s)
         unique={(s['start'],s['end'],s['text']):s for s in uncertain}
         result = {'language':self.language, 'model':cfg.get('speech_model','whisper-large-v3'),'accepted':accepted, 'spoken':word_intervals(accepted), 'vad':vad,'uncertain':list(unique.values())}
@@ -255,7 +284,7 @@ class QwenRecognizer(WhisperRecognizer):
     def cache_identity(self,cfg):
         from .model_catalog import model_signature
         from .common import ROOT
-        return ['qwen-scan-1',model_signature(ROOT/'models/qwen-asr'),model_signature(ROOT/'models/qwen-aligner'),cfg['language']]
+        return ['qwen-scan-2',model_signature(ROOT/'models/qwen-asr'),model_signature(ROOT/'models/qwen-aligner'),cfg['language']]
 
     def transcribe(self,audio,clips,offset=0):
         if not clips:return []

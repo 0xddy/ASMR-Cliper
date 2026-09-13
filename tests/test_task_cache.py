@@ -50,10 +50,14 @@ class TaskCacheTests(unittest.TestCase):
         names = ['frames.npz', 'source-audio.mp4', 'analysis.part.wav', 'speech-a' + '0' * 11 + '.jsonl',
                  'acoustic-cache.json', 'semantic-cache.json.tmp', 'extraction-evidence.json', 'drinking-review.json', 'whisper-review.json',
                  'plan-extract.json', 'review-results/' + 'a' * 64 + '.json',
+                 'review-results/sounds-' + 'c' * 20 + '/acoustic-cache.json',
+                 'review-results/sounds-' + 'c' * 20 + '/semantic-cache.json.tmp',
                  'review-results/chunks/' + 'b' * 64 + '.json', 'inference-test/audio.npy']
         for name in names:
             path = task / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'intermediate')
         unknown = task / 'personal.wav'; unknown.write_bytes(b'leave me')
+        unknown_sound=task/'review-results/sounds-personal/semantic-cache.json'
+        unknown_sound.parent.mkdir();unknown_sound.write_bytes(b'leave me too')
         model = self.root / 'models' / 'model.bin'; model.parent.mkdir(); model.write_bytes(b'model')
         for name in ('校验报告.json', '剪辑计划.json', '人声复核.csv', '节目单.json'):
             (self.output.parent / name).write_text('result', encoding='utf8')
@@ -63,6 +67,7 @@ class TaskCacheTests(unittest.TestCase):
         self.assertEqual(result['removed_files'], 1 + len(names))
         self.assertEqual(list(cache.payload_files(task)), [])
         self.assertEqual(unknown.read_bytes(), b'leave me'); self.assertEqual(model.read_bytes(), b'model')
+        self.assertEqual(unknown_sound.read_bytes(),b'leave me too')
         self.assertEqual(self.source.read_bytes(), b'original media'); self.assertEqual(self.output.read_bytes(), b'finished media')
         self.assertTrue((self.output.parent / '人声复核.csv').is_file())
         self.assertTrue((task / '.lock').is_file())

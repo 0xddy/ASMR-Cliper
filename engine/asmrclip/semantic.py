@@ -136,7 +136,11 @@ def positive(record,seed=False,cfg=None):
     threshold,margin=(.20,.025) if seed else (.17,.005)
     if target<threshold or target-competitor<margin:return False
     texture=record.get('texture',0)
-    return texture>=.035 and max(record.get(k,0) for k in ('expressive','impact','loud_laugh'))<.30
+    # AudioSet texture labels omit many close-mic / low-frequency ASMR
+    # sounds. Strong, clearly separated semantic evidence may support them;
+    # the repeated-window rule and independent voice/break vetoes still apply.
+    supported=texture>=.035 or (target>=.30 and target-competitor>=.08)
+    return supported and max(record.get(k,0) for k in ('expressive','impact','loud_laugh'))<.30
 
 
 def semantic_regions(records,cfg=None):
@@ -163,7 +167,10 @@ def confirm(cfg,pcm,cache,classifier,speech,music,exclusions,duration,matcher=No
     from .exclusions import selected_exclusions
     blocked=merge(speech['spoken']+music+exclusions.get('voice',[])+selected_exclusions(exclusions,cfg)+sum((exclusions.get(k,[]) for k in ('airflow','drinking','impacts','loud_laugh')),[]))
     windows=[]
-    for a,b in complement(blocked,duration):
+    # Classify with the model's full context, then intersect affirmative
+    # evidence with safe intervals. Cropping every ASR gap before inference
+    # leaves mostly tiny padded windows and can collapse V4 to a few seconds.
+    for a,b in complement(music,duration):
         for t in np.arange(a,b,5.):
             if b-t>=3:windows.append((float(t),float(min(t+10,b))))
     records=classifier.windows(windows)
@@ -180,6 +187,6 @@ def confirm(cfg,pcm,cache,classifier,speech,music,exclusions,duration,matcher=No
     rows=[by_span.get((r['start'],r['end']),{**r,'semantic':{}}) for r in records]
     report=semantic_regions(rows,cfg);report['records']=rows
     from .whispering import allowed,subtract
-    report['intervals']=merge(report['intervals']+subtract(allowed(cfg,exclusions),blocked))
+    report['intervals']=subtract(merge(report['intervals']+allowed(cfg,exclusions)),blocked)
     save_json(cache/'extraction-evidence.json',report)
     return report

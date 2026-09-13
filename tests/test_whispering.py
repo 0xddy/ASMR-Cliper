@@ -27,6 +27,35 @@ def whisper(a,b):
 
 
 class WhisperTests(unittest.TestCase):
+    def test_short_crops_use_confirmed_context_but_still_require_fine_semantics(self):
+        with tempfile.TemporaryDirectory() as directory,contextlib.redirect_stdout(io.StringIO()):
+            classifier=Mock();matcher=Mock();matcher.available.return_value=True
+            def windows(spans):
+                return [{**whisper(a,b),'whisper':.8 if b-a>=9 else .01} for a,b in spans]
+            classifier.windows.side_effect=windows
+            matcher.score.side_effect=lambda rows,*args,**kwargs:rows
+            result,_=detect({},np.zeros(20*16000,np.int16),Path(directory),classifier,matcher,[],20)
+            self.assertTrue(result)
+            def normal_fine(rows,*args,**kwargs):
+                return [{**r,'semantic':{'whisper_asmr':.3,'normal_speech':.7}} if r['end']-r['start']<4 else r for r in rows]
+            matcher.score.side_effect=normal_fine
+            result,_=detect({},np.zeros(20*16000,np.int16),Path(directory),classifier,matcher,[],20)
+            self.assertEqual(result,[])
+            self.assertFalse(positive({**whisper(0,3),'whisper':.01,'whisper_context':True,'voiced':.8}))
+
+    def test_v4_keeps_full_classification_context_then_subtracts_speech(self):
+        with tempfile.TemporaryDirectory() as directory:
+            classifier=Mock();matcher=Mock()
+            classifier.windows.side_effect=lambda spans:[{'start':a,'end':b,'texture':.1 if b-a>=9 else 0.,
+                'semantic':{'mouth':.6,'speech':.1}} for a,b in spans]
+            matcher.score.side_effect=lambda rows,*args,**kwargs:rows
+            result=confirm({},np.zeros(20*16000,np.int16),Path(directory),classifier,
+                           {'spoken':[[6,8],[12,14]]},[],{},20,matcher)
+            self.assertTrue(result['intervals'])
+            self.assertTrue(any(b-a==10 for a,b in classifier.windows.call_args.args[0]))
+            for a,b in result['intervals']:
+                self.assertFalse(any(a<d and b>c for c,d in [[6,8],[12,14]]))
+
     def test_program_menu_can_name_whispers_without_calling_them_normal_speech(self):
         from asmrclip.program_menu import identify,chapters
         self.assertEqual(identify({'whisper':.6,'speech':.3})[0],'whisper')
@@ -83,7 +112,7 @@ class WhisperTests(unittest.TestCase):
             self.assertTrue(intervals)
             self.assertFalse(any(a<7 and b>5 for a,b in intervals))
             self.assertEqual(json.loads((cache/'whisper-review.json').read_text('utf8'))['intervals'],intervals)
-            self.assertEqual(report['status'],'checked');classifier.close.assert_called_once()
+            self.assertEqual(report['status'],'checked');self.assertEqual(classifier.close.call_count,2)
 
     def test_all_modes_keep_verified_whispers_and_still_delete_chat_after_replanning(self):
         class Texture:

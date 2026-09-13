@@ -596,7 +596,9 @@ std::wstring MainWindow::reviewFindingsText() const {
         swprintf_s(text,L"%02llu:%02llu:%02llu.%03llu",ms/3600000,(ms/60000)%60,(ms/1000)%60,ms%1000);return std::wstring(text);
     };
     for(const auto& row:findings) {
-        content+=stamp(row.value("start",0.))+L" — "+stamp(row.value("end",0.))+L"\n"+Wide(row.value("text",""))+L"\n\n";
+        content+=stamp(row.value("start",0.))+L" — "+stamp(row.value("end",0.))+L"\n"+Wide(row.value("text",""))+L"\n";
+        if(row.contains("reason"))content+=Wide(row.value("reason",""))+L"；保留待复听。\n";
+        content+=L"\n";
     }
     return content;
 }
@@ -798,7 +800,19 @@ LRESULT MainWindow::message(UINT msg,WPARAM wp,LPARAM lp) {
             else programMenuTask();
         } else if((id==Play||id==Mapping)&&lastResult_.contains("output")) {
             fs::path target=Wide(lastResult_["output"]);if(id==Mapping) target=target.parent_path()/L"剪辑时间对照.csv";
-            if(fs::exists(target)) ShellExecuteW(window_,L"open",target.c_str(),nullptr,nullptr,SW_SHOWNORMAL);
+            std::error_code error;
+            if(!fs::exists(target,error)) {
+                MessageBoxW(window_,L"结果文件已移动或删除，请检查处理记录中的保存位置。",L"无法打开结果",MB_OK|MB_ICONINFORMATION);
+            } else {
+                SHELLEXECUTEINFOW open{sizeof(open)};open.fMask=SEE_MASK_FLAG_NO_UI;
+                open.hwnd=window_;open.lpVerb=L"open";open.lpFile=target.c_str();open.nShow=SW_SHOWNORMAL;
+                if(!ShellExecuteExW(&open)) {
+                    const auto code=GetLastError();
+                    std::wstring message=L"系统无法打开结果（错误 "+std::to_wstring(code)+L"）。";
+                    message+=target.wstring().size()>=240?L"\n文件路径过长，请将成片移至较短的目录后播放。":L"\n请检查该文件类型的默认播放器或打开程序。";
+                    appendLog(message);MessageBoxW(window_,message.c_str(),L"无法打开结果",MB_OK|MB_ICONINFORMATION);
+                }
+            }
         }
         return 0;
     }

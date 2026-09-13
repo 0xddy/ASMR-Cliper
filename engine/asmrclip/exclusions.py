@@ -36,8 +36,7 @@ def summarize(scores):
 
 
 def strong_voice(record):
-    if (record.get('retained_whisper') and record.get('whisper',0)>=.2
-            and record.get('whisper',0)>=record.get('voiced',0)*.8
+    if (record.get('retained_whisper') and record.get('voiced',0)<.35
             and record.get('expressive',0)<.25):return False
     # Independent sigmoid labels can simultaneously score speech and texture.
     # Positive texture is not evidence against an independently strong voice.

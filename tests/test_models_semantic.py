@@ -41,6 +41,9 @@ class ModelSemanticTests(unittest.TestCase):
         self.assertFalse(positive(row(0,target=.1,other=.08)))
         self.assertFalse(positive(row(0,speech=.8)))
         self.assertFalse(positive(row(0,quiet=True)))
+        self.assertTrue(positive({**row(0,target=.45,other=.2),'texture':.002}))
+        self.assertFalse(positive({**row(0,target=.3,other=.28),'texture':.002}))
+        self.assertFalse(positive({**row(0,target=.65,other=.2),'texture':.002,'speech':.85}))
 
     def test_v4_does_not_bridge_rejected_or_unknown_audio(self):
         rows=[row(a) for a in range(0,45,5)];rows[4]=row(20,target=.1,other=.4)

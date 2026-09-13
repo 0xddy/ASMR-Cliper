@@ -33,7 +33,7 @@ def review_cache_key(path,language,payload,duration,rate,channels):
     from .model_catalog import model_signature
     signature=model_signature(path)
     if path.name=='qwen-asr':signature+=model_signature(path.parent/'qwen-aligner')
-    identity=['full-review-3',str(path.resolve()),signature,language,payload,round(duration,6),rate,channels]
+    identity=['full-review-4',str(path.resolve()),signature,language,payload,round(duration,6),rate,channels]
     return hashlib.sha256(json.dumps(identity,ensure_ascii=False).encode()).hexdigest()
 
 
@@ -60,6 +60,7 @@ def output_to_source(findings, keeps, dt):
     for a,b in keeps:
         length=(b-a)*dt
         for item in findings:
+            if item.get('review_only'):continue
             lo=max(cursor,item['start']);hi=min(cursor+length,item['end'])
             if hi>lo:result.append([a*dt+lo-cursor,a*dt+hi-cursor])
         cursor+=length
@@ -70,6 +71,7 @@ def mapped_output_to_source(findings,mapping):
     result=[]
     for row in mapping:
         for item in findings:
+            if item.get('review_only'):continue
             lo=max(row['output_start'],item['start']);hi=min(row['output_end'],item['end'])
             if hi>lo:
                 result.append([row['analysis_start']+lo-row['output_start'],row['analysis_start']+hi-row['output_start']])
@@ -144,9 +146,18 @@ class Reviewer:
                 segments=self.recognizer.transcribe(audio,clips)
             checked+=len(clips)
             for s in segments:
-                if not review_speech(s):continue
-                findings.append({'start':s['start'],'end':s['end'],'text':s['text'],
-                    'avg_logprob':s.get('avg_logprob'),'word_probability':sum(w.get('probability',0) for w in s['words'])/max(1,len(s['words'])) if s.get('backend')!='qwen3-asr' else None})
+                reason=''
+                if not review_speech(s):
+                    from .recognition import qwen_lexical,qwen_alignment_issue
+                    if s.get('backend')!='qwen3-asr' or not qwen_lexical(s):continue
+                    reason=qwen_alignment_issue(s)
+                    if not reason:continue
+                from .recognition import word_intervals
+                spans=word_intervals([s]) if not reason and all('start' in w and 'end' in w for w in s.get('words',[])) else [[s['start'],s['end']]]
+                for a,b in spans:
+                    findings.append({'start':a,'end':b,'text':s['text'],
+                        **({'review_only':True,'reason':reason} if reason else {}),
+                        'avg_logprob':s.get('avg_logprob'),'word_probability':sum(w.get('probability',0) for w in s['words'])/max(1,len(s['words'])) if s.get('backend')!='qwen3-asr' else None})
         # Publish only after full coverage AND the boundary pass complete.
         if path:save_json(path,{'cache_key':key,'windows_checked':windows_checked,'findings':findings})
         return findings,windows_checked,False
@@ -168,7 +179,7 @@ class Reviewer:
             if cached.get('cache_key')==key and isinstance(cached.get('review'),dict):
                 result=cached['review'];result['cache_reused']=True
                 event('log','复用同一音频帧内容与模型版本的完整成片复核。')
-                advance(1,1,'完整复核缓存')
+                advance(85 if self.cfg.get('speech_model')=='qwen3-asr' else 100,100,'完整复核缓存')
                 return result
         findings=[];windows_checked=0;chunks_reused=0
         # Keep the existing model/rule signature and add the execution device.
@@ -177,9 +188,10 @@ class Reviewer:
         # Full timeline coverage plus an extra pass at inference boundaries.
         # Adjacent 300-second batches overlap by two seconds as well.
         bases=range(0,len(pcm),300*16000)
+        coverage=.85 if self.cfg.get('speech_model')=='qwen3-asr' else 1.
         for index,base in enumerate(bases):
             chunk=pcm[base:min(len(pcm),base+302*16000)]
-            with scope(f'音频块 {index+1}/{len(bases)}',index/len(bases),(index+1)/len(bases)):
+            with scope(f'音频块 {index+1}/{len(bases)}',coverage*index/len(bases),coverage*(index+1)/len(bases)):
                 rows,count,reused=self.inspect_chunk(chunk,chunk_identity)
                 if reused:activity('复用已完成的全段与边界检查')
             for s in rows:

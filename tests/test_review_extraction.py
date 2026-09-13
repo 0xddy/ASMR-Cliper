@@ -131,6 +131,14 @@ class ReviewExtractionTests(unittest.TestCase):
             self.assertFalse(flagged['payload_unchanged']);self.assertEqual(len(flagged['audio_fades']['edges']),2)
             self.assertTrue(flagged['decode_verified'])
             self.assertIn('hello',(Path(flagged['output']).parent/'人声复核.csv').read_text(encoding='utf-8-sig'))
+            class Unreliable:
+                def inspect(self,path,report):
+                    return {'status':'speech_found','findings':[{'start':1,'end':1.08,'text':'possible words',
+                        'review_only':True,'reason':'collapsed alignment'}]}
+            review_only=export(source,out,meta,frames,plan,cfg,fingerprint(source),Unreliable())
+            self.assertEqual(review_only['speech_review']['status'],'needs_review')
+            self.assertEqual(review_only['duration'],flagged['duration'])
+            self.assertIn('collapsed alignment',(Path(review_only['output']).parent/'人声复核.csv').read_text(encoding='utf-8-sig'))
             class Broken:
                 def inspect(self,path,report):raise RuntimeError('model inference failed')
             before=set(out.iterdir())
