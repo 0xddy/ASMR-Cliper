@@ -243,7 +243,8 @@ void MainWindow::testControls() {
     selectPage(3,0);click(Reset);strictExpanded_=false;layout();
     check("editing groups sounds pauses and fades",visible(KeepSoftLaugh)&&visible(KeepTapping)&&visible(Silence)&&visible(FadeEnabled)&&!visible(Language)&&!visible(Audit)&&!visible(ProxyUrl));
     check("strict parameters can be folded",!visible(Before)&&visible(StrictDetails));
-    check("sound defaults preserved",checked(KeepSoftLaugh)&&checked(KeepHeartbeat)&&checked(KeepTapping)&&!checked(KeepLoudLaugh)&&!checked(KeepVaping)&&!checked(KeepDrinking)&&!checked(KeepImpacts));
+    check("sound defaults preserved",checked(KeepWhisper)&&checked(KeepSoftLaugh)&&checked(KeepHeartbeat)&&checked(KeepTapping)&&!checked(KeepLoudLaugh)&&!checked(KeepVaping)&&!checked(KeepDrinking)&&!checked(KeepImpacts));
+    check("whisper permission is visible and named correctly",visible(KeepWhisper)&&value(KeepWhisper)==L"轻语 / 耳语");
     check("airflow label no longer identifies a device",value(KeepVaping)==L"呼气/烟雾");
     check("pause and fade defaults preserved",value(Silence)==L"1.5"&&!checked(FadeEnabled)&&value(FadeSeconds)==L"0.3"&&!IsWindowEnabled(control(FadeSeconds)));
     check("output edges default on at half a second",checked(EdgeFadeEnabled)&&value(EdgeFadeSeconds)==L"0.5"&&IsWindowEnabled(control(EdgeFadeSeconds)));
@@ -275,7 +276,7 @@ void MainWindow::testControls() {
     for(auto [id,key]:SoundOptions)click(id);
     flushPendingSettings();populateSettings(0);
     check("editing saves pause fade and strict parameters together",cfg_["max_pause_seconds"]==1.2&&cfg_["strict_pre"]==6.5&&cfg_["join_fade_enabled"]==true&&cfg_["join_fade_seconds"]==.45&&value(Silence)==L"1.2"&&value(FadeSeconds)==L"0.45"&&!cfg_.contains("silence_seconds"));
-    check("retention settings round trip",!checked(KeepSoftLaugh)&&!checked(KeepHeartbeat)&&!checked(KeepTapping)&&checked(KeepLoudLaugh)&&checked(KeepVaping)&&checked(KeepDrinking)&&checked(KeepImpacts));
+    check("retention settings round trip",!checked(KeepWhisper)&&cfg_["keep_whisper"]==false&&!checked(KeepSoftLaugh)&&!checked(KeepHeartbeat)&&!checked(KeepTapping)&&checked(KeepLoudLaugh)&&checked(KeepVaping)&&checked(KeepDrinking)&&checked(KeepImpacts));
     const auto previousFade=cfg_["join_fade_seconds"];text(Silence,L"1.1");click(KeepTapping);text(FadeSeconds,L"nan");flushPendingSettings();
     check("invalid fade keeps last valid value without blocking other settings",cfg_["join_fade_seconds"]==previousFade&&cfg_["max_pause_seconds"]==1.1&&cfg_["keep_tapping"]==true);
     const auto beforeInvalid=cfg_;
@@ -340,6 +341,8 @@ void MainWindow::testAutoSave() {
     cfg_=ReadJson(root_/L"config/defaults.json");cfg_["input"]="";cfg_["output_dir"]="output";
     populateSettings();saveSettings();selectPage(3,0);
     check("preferences have no save button",!control(ReservedSave)&&control(Reset));
+    check("whispers are enabled by default",saved()["keep_whisper"]==true);
+    click(KeepWhisper);check("whisper permission saves immediately",saved()["keep_whisper"]==false);
     click(FadeEnabled);check("switch saves immediately to disk",saved()["join_fade_enabled"]==true);
     text(Silence,L"");pump(450);
     check("unfinished number keeps saved value",saved()["max_pause_seconds"]==1.5);
@@ -359,6 +362,7 @@ void MainWindow::testAutoSave() {
     click(Reset);check("reset saves only the current category",saved()["proxy_url"]==cfg_["proxy_url"]&&saved()["proxy_enabled"]==true&&saved()["language"]=="ja"&&saved()["strict_pre"]==6.5);
     selectPage(3,0);text(Silence,L"2.5");click(Reset);pump(450);
     check("reset discards a pending value in its category",saved()["max_pause_seconds"]==1.5&&value(Silence)==L"1.5"&&saved()["language"]=="ja");
+    check("editing reset restores whisper permission",saved()["keep_whisper"]==true);
     const auto beforePopulate=saved();populateSettings();pump(450);
     check("configuration population does not write incidental changes",saved()==beforePopulate&&pendingSettings_.empty());
     // Block only this test's temporary output file to exercise a real write failure.
@@ -367,13 +371,14 @@ void MainWindow::testAutoSave() {
     check("failed disk write keeps saved configuration and reports failure",saved()["keep_soft_laugh"]==true&&cfg_["keep_soft_laugh"]==true&&saveErrorControl_==KeepSoftLaugh);
     fs::remove(temporary);flushPendingSettings();
     check("failed write can be retried without repeating the change",saved()["keep_soft_laugh"]==false&&saveErrorControl_==0);
+    click(KeepWhisper);
     selectPage(0);click(Extract);choose(OutputKind,2);
     check("mode and mandatory V4 review persist together",saved()["mode"]=="extract"&&saved()["review_enabled"]==true&&saved()["output_kind"]=="video");
     auto expected=saved();enableControls(true);click(Reset);click(KeepTapping);choose(Language,4);
     check("busy task cannot change saved preferences",saved()==expected);
     enableControls(false);populateSettings();
     MainWindow reloaded(root_,{{"test-config",Utf8(file.wstring())},{"test-autosave",options_["test-autosave"]}});
-    check("fresh application loads automatically saved preferences",reloaded.cfg_["mode"]=="extract"&&reloaded.cfg_["language"]=="ja"&&reloaded.cfg_["audio_output_codec"]=="aac"&&reloaded.cfg_["keep_soft_laugh"]==false);
+    check("fresh application loads automatically saved preferences",reloaded.cfg_["mode"]=="extract"&&reloaded.cfg_["language"]=="ja"&&reloaded.cfg_["audio_output_codec"]=="aac"&&reloaded.cfg_["keep_soft_laugh"]==false&&reloaded.cfg_["keep_whisper"]==false);
     notice_=false;status_.clear();selectPage(3,0);screenshot(report.parent_path()/L"preferences-autosave.png");
     bool passed=std::all_of(checks.begin(),checks.end(),[](const auto& row){return row.at("passed").template get<bool>();});
     WriteJson(report,{{"passed",passed},{"checks",checks}});completed_=passed;finishTest(passed?0:1);

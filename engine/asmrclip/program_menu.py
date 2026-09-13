@@ -22,7 +22,7 @@ LABELS = {
     'wet_mouth':'舔耳 / 湿润口腔音', 'mouth_clicks':'唇音 / 口腔轻响',
     'brushing':'刷麦 / 轻刷', 'rubbing':'摩擦 / 抓挠', 'tapping':'道具敲击',
     'crinkling':'揉纸 / 细碎沙沙声', 'heartbeat':'心跳', 'airflow':'呼气 / 气流',
-    'water':'水声 / 饮水', 'laughter':'笑声', 'speech':'疑似说话',
+    'water':'水声 / 饮水', 'laughter':'笑声', 'whisper':'轻语 / 耳语', 'speech':'疑似说话',
     'music':'背景音乐', 'background':'安静 / 背景声', 'unknown':'待确认', 'mixed':'混合 ASMR'}
 # These are candidate sound descriptions, not a requested sequence of activities.
 # Separate prompts/cache from V4: menu naming must never alter clipping evidence.
@@ -55,14 +55,17 @@ PROMPTS = {
         'The sound of pouring and splashing water.',
         'The sound of drinking from a cup and swallowing water.'],
     'laughter':['The sound of a person giggling and laughing.'],
+    'whisper':[
+        'The sound of soft breathy ASMR whispering very close to the ears.',
+        'The sound of a gentle quiet whispered voice speaking close to a microphone for ASMR.'],
     'speech':[
         'The sound of a woman speaking intelligible words and having a conversation.',
-        'The sound of a woman whispering intelligible words.'],
+        'The sound of a woman talking in a normal conversational voice.'],
     'music':['The sound of music playing.'],
     'background':[
         'The sound of quiet room noise, hum and silence.',
         'The sound of electronic buzzing, static noise or a steady electronic tone.']}
-ASMR = frozenset(('wet_mouth','mouth_clicks','brushing','rubbing','tapping','crinkling','heartbeat'))
+ASMR = frozenset(('wet_mouth','mouth_clicks','brushing','rubbing','tapping','crinkling','heartbeat','whisper'))
 
 
 def available():

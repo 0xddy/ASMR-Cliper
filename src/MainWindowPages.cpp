@@ -80,7 +80,7 @@ void MainWindow::createControls() {
     button(EdgeFadeEnabled,30,L"成片首尾淡化");InitToggleControl(control(EdgeFadeEnabled),true);
     add(EdgeFadeSeconds,30,L"EDIT",L"",WS_TABSTOP|ES_AUTOHSCROLL);
     add(FadeSeconds,30,L"EDIT",L"",WS_TABSTOP|ES_AUTOHSCROLL);button(StrictDetails,30,L"展开参数");
-    const wchar_t* sounds[]={L"轻笑",L"心跳",L"道具敲击",L"大笑",L"呼气/烟雾",L"喝水休息",L"掉落 / 撞击"};
+    const wchar_t* sounds[]={L"轻笑",L"轻语 / 耳语",L"心跳",L"道具敲击",L"大笑",L"呼气/烟雾",L"喝水休息",L"掉落 / 撞击"};
     int soundIndex=0;
     for(auto [id,key]:SoundOptions){button(id,30,sounds[soundIndex++]);InitToggleControl(control(id));}
     button(Language,31,L"");InitChoiceControl(control(Language));
@@ -99,7 +99,7 @@ void MainWindow::createControls() {
     setFonts();populateSettings();updateHistory();enableControls(false);
     settingsReady_=true;
     SendMessageW(window_,WM_CHANGEUISTATE,MAKEWPARAM(UIS_SET,UISF_HIDEFOCUS),0);
-    appendLog(L"ASMR-Cliper 0.6.16");
+    appendLog(L"ASMR-Cliper 0.6.17");
     selectPage(page_);
 }
 
@@ -133,7 +133,7 @@ void MainWindow::populateSettings(int tab) {
         text(ProxyUrl,Wide(cfg_.value("proxy_url","http://127.0.0.1:10886")));
     }
     if(tab<0||tab==0) {
-        for(auto [id,key]:SoundOptions)SendMessageW(control(id),BM_SETCHECK,cfg_.value(key,id==KeepSoftLaugh||id==KeepHeartbeat||id==KeepTapping)?BST_CHECKED:BST_UNCHECKED,0);
+        for(auto [id,key]:SoundOptions)SendMessageW(control(id),BM_SETCHECK,cfg_.value(key,id==KeepSoftLaugh||id==KeepHeartbeat||id==KeepTapping||id==KeepWhisper)?BST_CHECKED:BST_UNCHECKED,0);
         for(auto [id,key]:std::vector<std::pair<int,const char*>>{{Silence,"max_pause_seconds"},{SilenceDb,"silence_db"},{Before,"strict_pre"},{After,"strict_post"},{Minimum,"strict_min_section"},{DenseGap,"strict_dense_gap"}})text(id,Number(cfg_.value(key,0.)));
         SendMessageW(control(FadeEnabled),BM_SETCHECK,cfg_.value("join_fade_enabled",false)?BST_CHECKED:BST_UNCHECKED,0);
         text(FadeSeconds,Number(cfg_.value("join_fade_seconds",.3)));
@@ -152,7 +152,7 @@ std::vector<std::string> MainWindow::requiredComponents() const {
     };
     add(cfg_.value("speech_model","whisper-large-v3"));
     if(cfg_.value("review_enabled",true)||cfg_.value("mode","")=="extract")add(cfg_.value("review_model_id","whisper-large-v3"));
-    if(cfg_.value("mode","")=="extract"||!cfg_.value("keep_drinking",false)){result.push_back("clap");result.push_back("neural");}
+    if(cfg_.value("mode","")=="extract"||!cfg_.value("keep_drinking",false)||cfg_.value("keep_whisper",true)){result.push_back("clap");result.push_back("neural");}
     return result;
 }
 
@@ -293,7 +293,7 @@ void MainWindow::paint(HDC dc) {
     auto line=[&](int a,int y,int right) {auto pen=CreatePen(PS_SOLID,1,Line);auto old=SelectObject(dc,pen);MoveToEx(dc,d(a),d(y),nullptr);LineTo(dc,d(right),d(y));SelectObject(dc,old);DeleteObject(pen);};
     RECT side{0,0,d(200),b.bottom};FillRect(dc,&side,white_);
     auto icon=LoadIconW(instance_,MAKEINTRESOURCEW(101));if(icon)DrawIconEx(dc,d(22),d(32),icon,d(24),d(24),0,nullptr,DI_NORMAL);
-    label(L"ASMR-Cliper",54,28,142,32,brandFont_);label(L"v0.6.16",24,h-43,140,20,smallFont_,Muted);
+    label(L"ASMR-Cliper",54,28,142,32,brandFont_);label(L"v0.6.17",24,h-43,140,20,smallFont_,Muted);
     const wchar_t* titles[]={L"剪辑任务",L"处理记录",L"运行环境",L"偏好设置",L"运行日志"};label(titles[page_],x,24,cw-260,42,titleFont_);
     if(page_==0) {
         card(96,374);label(L"音频 / 视频文件",x+24,110,cw-48,24,font_);label(L"输出目录",x+24,194,cw-48,24,font_);
@@ -335,7 +335,7 @@ void MainWindow::paint(HDC dc) {
             Rounded(dc,{d(x),d(158),d(x+half),d(458)},White,Line,d(16));
             Rounded(dc,{d(right),d(158),d(r),d(458)},White,Line,d(16));
             label(L"保留声音",x+24,174,half-48,28,boldFont_);
-            label(L"勾选表示保留 · 说话声始终删除",x+24,210,half-48,22,smallFont_,Muted);
+            label(L"勾选表示保留 · 普通说话仍删除",x+24,210,half-48,22,smallFont_,Muted);
             label(L"停顿与淡化",right+24,174,half-48,28,boldFont_);
             label(L"最长空窗期（秒）",right+24,210,small,22,smallFont_,Muted);
             label(L"静音电平（dB）",right+32+small,210,small,22,smallFont_,Muted);

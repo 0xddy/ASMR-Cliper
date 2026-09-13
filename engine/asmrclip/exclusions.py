@@ -9,7 +9,7 @@ EXPRESSIVE = {'Shout','Bellow','Whoop','Yell','Battle cry','Children shouting','
               'Whimper','Wail, moan','Groan','Grunt'}
 SOFT_LAUGH = {'Giggle','Snicker','Chuckle, chortle'}
 IMPACT = {'Slam','Coin (dropping)','Thump, thud','Bang','Smash, crash','Breaking','Clatter'}
-KEEP_DEFAULTS = {'keep_soft_laugh':True,'keep_loud_laugh':False,'keep_vaping':False,
+KEEP_DEFAULTS = {'keep_whisper':True,'keep_soft_laugh':True,'keep_loud_laugh':False,'keep_vaping':False,
                  'keep_drinking':False,'keep_impacts':False,'keep_heartbeat':True,'keep_tapping':True}
 RESPIRATORY = {'Breathing','Gasp','Sigh','Pant','Snort','Wheeze','Sneeze','Cough','Throat clearing'}
 AIRFLOW = {'Spray','Steam','Hiss','Sizzle'}
@@ -23,6 +23,7 @@ TEXTURE = MOUTH | HEARTBEAT | TAPPING | {'Crackle','Crushing','Stir','Rub','Scra
 def summarize(scores):
     def peak(labels): return max((scores.get(k,0.) for k in labels),default=0.)
     return {'speech':peak(SPEECH),'speech_base':scores.get('Speech',0.),'expressive':peak(EXPRESSIVE),
+            'whisper':scores.get('Whispering',0.),'voiced':peak(SPEECH-{'Speech','Babbling','Whispering'}),
             'lexical':peak(SPEECH-{'Speech','Babbling'}),
             'soft_laugh':peak(SOFT_LAUGH),'loud_laugh':scores.get('Belly laugh',0.),
             'laughter':scores.get('Laughter',0.),'impact':peak(IMPACT),
@@ -35,6 +36,9 @@ def summarize(scores):
 
 
 def strong_voice(record):
+    if (record.get('retained_whisper') and record.get('whisper',0)>=.2
+            and record.get('whisper',0)>=record.get('voiced',0)*.8
+            and record.get('expressive',0)<.25):return False
     # Independent sigmoid labels can simultaneously score speech and texture.
     # Positive texture is not evidence against an independently strong voice.
     # Generic Speech may co-activate with nonlexical laughter. Actual recognized

@@ -17,6 +17,7 @@ class Classifier:
         from transformers import ASTFeatureExtractor
         ort.set_default_logger_severity(3)
         self.pcm, self.cfg = pcm, cfg
+        self.retained_whispers=[]
         model_path = Path(cfg['ast_model'])
         # This model's standard 128-bin filter bank intentionally has empty
         # low-frequency FFT bins. Avoid a non-actionable warning in the GUI.
@@ -32,11 +33,16 @@ class Classifier:
             providers.insert(0, ('CUDAExecutionProvider', {'cudnn_conv_algo_search':'DEFAULT'}))
         self.session=None;self.opts=opts;self.providers=providers;self.model_path=model_path
         self.path = cache/'acoustic-cache.json'
-        self.identity = str(model_path.resolve())+':'+str((model_path/'onnx/model.onnx').stat().st_mtime_ns)+':events-v5'
+        self.identity = str(model_path.resolve())+':'+str((model_path/'onnx/model.onnx').stat().st_mtime_ns)+':events-v6'
         previous = read_json(self.path) if self.path.exists() else {}
         self.cached = previous.get('windows', {}) if previous.get('model') == self.identity else {}
 
     def close(self):self.session=None
+
+    def records(self,keys):
+        from .whispering import covers
+        return [{**self.cached[key],'retained_whisper':True} if covers(self.cached[key]['start'],self.cached[key]['end'],getattr(self,'retained_whispers',[]))
+                else self.cached[key] for key in keys]
 
     def windows(self, windows):
         wanted = [(float(a), float(b)) for a,b in windows]
@@ -47,7 +53,7 @@ class Classifier:
         # Boundary planning and retries often ask only for cached windows.
         # Do not rewrite a multi-megabyte cache when nothing changed.
         if not jobs:
-            return [self.cached[key] for key in keys]
+            return self.records(keys)
         for offset in range(0, len(jobs), 8):
             arrays, live = [], []
             for key, (a,b) in jobs[offset:offset+8]:
@@ -75,7 +81,7 @@ class Classifier:
                 save_json(self.path, {'model':self.identity,'windows':self.cached})
                 if len(jobs) >= 160:
                     event('log', f'声学上下文分析：{completed} / {len(jobs)} 个窗口')
-        return [self.cached[key] for key in keys]
+        return self.records(keys)
 
     def music_intervals(self, duration):
         # Ten-second windows cover the entire recording; no source-specific

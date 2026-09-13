@@ -20,6 +20,7 @@
   "review_model": "models/whisper-review",
   "review_max_passes": 3,
   "keep_soft_laugh": true,
+  "keep_whisper": true,
   "keep_heartbeat": true,
   "keep_tapping": true,
   "keep_loud_laugh": false,

@@ -25,6 +25,8 @@ def dense_conversations(episodes):
 def scene_guard(probes, edge, side):
     guard, reason = edge, []
     for p in probes:
+        if p.get('retained_whisper') and not strong_voice(p):
+            reason.append('已确认且允许保留的轻语 / 耳语');break
         texture, breath, voice = p['texture'], p['breath'], p['speech']
         if strong_voice(p):
             guard = p['end'] if side == 'start' else p['start']
@@ -47,7 +49,9 @@ def make_plan(meta, frames, speech, music, cfg, classifier=None, exclusions=None
     wide = 20*np.log10(np.maximum(maximum_filter1d(rms,size=9,mode='nearest'),1e-10))
     active_db = cfg['silence_db']+6
     review, rejected = [], []
-    spoken = merge(speech['spoken']+(exclusions or {}).get('voice',[]),.65)
+    from .whispering import allowed,subtract
+    whispers=allowed(cfg,exclusions or {})
+    spoken = subtract(merge(speech['spoken']+(exclusions or {}).get('voice',[]),.65),whispers)
     excluded = selected_exclusions(exclusions or {},cfg)
     extraction=(exclusions or {}).get('extraction',{})
     if cfg['mode']=='extract':
@@ -97,7 +101,7 @@ def make_plan(meta, frames, speech, music, cfg, classifier=None, exclusions=None
         return int(candidates[np.argmin(score)]),'local_gesture_trough'
 
     if cfg['mode']=='strict':
-        episodes=merge([[s['start'],s['end']] for s in speech['accepted']]+spoken,1.5)
+        episodes=subtract(merge([[s['start'],s['end']] for s in speech['accepted']]+spoken,1.5),whispers)
         dense=dense_conversations(episodes)
         removed=merge([[max(0,a-cfg['strict_pre']),min(duration,b+cfg['strict_post'])] for a,b in episodes+dense],cfg['strict_dense_gap'])
         blocked=[[strict_cut(a,'end'),strict_cut(b,'start')] for a,b in removed]

@@ -173,10 +173,11 @@ class ReviewExtractionTests(unittest.TestCase):
                 with self.subTest(mode=mode,replan_empty=empty):
                     cfg=settings({'input':str(source),'output_dir':str(folder/'out'),'cache_dir':str(folder/'cache'),
                                   'mode':mode,'review_max_passes':2,'audit':False,'generate_program_menu':False})
-                    recognizer=MagicMock();recognizer.scan.return_value={'spoken':[],'language':'en'}
+                    recognizer=MagicMock();recognizer.scan.return_value={'spoken':[[1.,1.5],[2.,2.2]],'language':'en'}
                     classifier=MagicMock();classifier.music_intervals.return_value=[]
                     classifier.exclusions.return_value={key:[] for key in ('voice','soft_laugh','heartbeat','tapping','loud_laugh','airflow','drinking','impacts')}
                     classifier.exclusions.return_value['drinking']=[[.3,.5]]
+                    classifier.exclusions.return_value['voice']=[[1.,1.5],[2.,2.2]]
                     drinks={'status':'checked','removed':[[.4,.7]],'candidates':[]}
                     reviewer=MagicMock()
                     reviewer.inspect.side_effect=lambda path,report:{'status':'speech_found',
@@ -188,11 +189,16 @@ class ReviewExtractionTests(unittest.TestCase):
                          patch('asmrclip.semantic.confirm',return_value={}) as extraction,patch('asmrclip.reviewer.Reviewer',return_value=reviewer), \
                          patch('asmrclip.transitions.review_transitions',return_value=([],{'candidates':[]})), \
                          patch('asmrclip.drinking.review_drinking',return_value=([[.4,.7]],drinks)), \
+                         patch('asmrclip.whispering.detect',return_value=([[1.,1.5]],{'intervals':[[1.,1.5]]})), \
                          patch('asmrclip.planner.make_plan',side_effect=plans) as planning,contextlib.redirect_stdout(io.StringIO()) as output:
                         report=run(cfg)
                     for call in planning.call_args_list:
                         self.assertEqual(call.args[6]['drinking'],[[.3,.7]])
                         self.assertEqual(call.args[6]['drinking_review'],drinks)
+                        self.assertEqual(call.args[6]['whisper'],[[1.,1.5]])
+                        self.assertEqual(call.args[6]['voice'],[[2.,2.2]])
+                        self.assertFalse(any(a<1.5 and b>1 for a,b in call.args[2]['spoken']))
+                    self.assertEqual(classifier.retained_whispers,[[1.,1.5]])
                     if mode=='extract':self.assertEqual(extraction.call_args.args[6]['drinking'],[[.3,.7]])
                     self.assertTrue(Path(report['output']).is_file())
                     self.assertFalse(report['payload_unchanged']);self.assertEqual(len(report['audio_fades']['edges']),2);self.assertTrue(report['decode_verified'])

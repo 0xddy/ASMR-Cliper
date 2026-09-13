@@ -207,6 +207,8 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
         if reviewer is not None:
             from .reviewer import SpeechRemaining, mapped_output_to_source
             review=reviewer.inspect(candidate or staging/filename,report)
+            from .whispering import apply_review
+            review=apply_review(review,plan,report,cfg)
             review['export_mapping']=report['mapping']
             if review['status']!='passed':
                 if review['status']!='speech_found':
@@ -266,6 +268,9 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
         report['acoustic_exclusion_counts']={k:len(plan.get('acoustic_exclusions',{}).get(k,[])) for k in ('voice','airflow','drinking','expressive_breaks','soft_laugh','loud_laugh','impacts','heartbeat','tapping','transitions')}
         report['transition_review']=plan.get('acoustic_exclusions',{}).get('transition_review',{})
         report['drinking_review']=plan.get('acoustic_exclusions',{}).get('drinking_review',{})
+        report['whisper_review']=plan.get('acoustic_exclusions',{}).get('whisper_review',{})
+        from .whispering import output_intervals
+        report['whisper_retained']=output_intervals(plan,report,cfg)
         if fingerprint(source)!=source_fingerprint:
             raise RuntimeError('处理期间源文件发生变化，请重新开始。')
         with (staging/'剪辑时间对照.csv').open('w',encoding='utf-8-sig',newline='') as f:
@@ -299,6 +304,9 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
             writer=csv.writer(f);writer.writerow(['原片分析开始','原片分析结束','检测判定','依据'])
             for r in report['drinking_review'].get('candidates',[]):
                 writer.writerow([clock(r['start']),clock(r['end']),'确认饮水休息' if r['decision']=='remove' else '未确认，不据此删除',r['reason']])
+        with (staging/'轻语保留.csv').open('w',encoding='utf-8-sig',newline='') as f:
+            writer=csv.writer(f);writer.writerow(['成片开始','成片结束','保留依据'])
+            for a,b in report['whisper_retained']:writer.writerow([clock(a),clock(b),'轻语 / 耳语声音证据，且已勾选保留'])
         review_status={'passed':'模型未检出残留话语','needs_review':'仍有疑似话语，待复听位置见人声复核.csv','disabled':'未开启'}[report['speech_review']['status']]
         video_note=(f"视频 {report['video_codec']} 精确切割并重新编码（{report['video_encoding']['encoder']}）；按视频帧向内调整额外剪去 {report['video_frame_trim_seconds']:.3f} 秒。\n"
                     "画面经过有损编码，源分辨率和保留帧时间轴不变；最终音轨与已确认音轨的包内容和时间戳校验通过。\n") if precise else (
@@ -317,7 +325,7 @@ VBR 平均码率约 {report['average_bitrate']/1000:.1f} kb/s，会随所保留�
 最长空窗期设置：{cfg.get('max_pause_seconds',1.5):g} 秒；实际低电平连续空窗最长约 {report['pause_check']['max_detected_seconds']:g} 秒。静音按电平与峰值共同判断，超限位置见空窗检查.csv。
 模式参数与切点依据见剪辑计划和校验报告；原音频未修改。
 使用首个音轨分析并输出；其他音轨、字幕与附件不输出，以免带回未经检查的人声或失效时间轴。
-说话声始终删除。其他声音按“保留声音”选项处理；默认保留轻笑、心跳和 ASMR 道具敲击。检出区间及保留选项见剪辑计划中的 acoustic_exclusions 和校验报告 settings。
+普通说话继续删除；默认勾选“轻语 / 耳语”，只保留有相应声音证据的区间，成片复核遵循同一选择。默认还保留轻笑、心跳和 ASMR 道具敲击。轻语保留.csv 使用成片时间，原片证据见 whisper_review；保留选项见校验报告 settings。
 音色突然变闷后的短过渡，只有确认是非 ASMR 中断残留才删除；正常低频 ASMR 保留。候选、模型证据和判定见校验报告 transition_review，时间使用原片分析时间轴。
 饮水休息另经声音语义与连续动作复核，按证据关联前后瓶盖动作；单独开瓶、水声或含糊口腔音不据此删除。判定见饮水复核.csv 和校验报告 drinking_review，时间使用原片分析时间轴。
 成片大模型复核：{review_status}。复核模型、覆盖范围和修改记录见校验报告。V4 只接纳正向声学证据区间，勾选声音不会将休息或未知声音变成提取目标。

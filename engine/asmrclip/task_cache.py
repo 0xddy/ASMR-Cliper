@@ -18,7 +18,7 @@ FILES = frozenset(('analysis.json', 'analysis.wav', 'analysis.part.wav', 'frames
     'extraction-evidence.json', 'exclusions-latest.json', 'audit-latest.json',
     'post-review-latest.json', 'plan-strict.json', 'plan-relaxed.json', 'plan-extract.json',
     'spectral-transitions.npz', 'spectral-transitions.part.npz', 'transition-review.json', 'source-audio.json',
-    'menu-windows.json', 'evidence.json', 'drinking-review.json'))
+    'menu-windows.json', 'evidence.json', 'drinking-review.json', 'whisper-review.json'))
 
 
 class CacheBusy(RuntimeError):

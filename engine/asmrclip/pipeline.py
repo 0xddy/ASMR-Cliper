@@ -74,20 +74,27 @@ def run(data):
         phase(3, '准备声音分类模型')
         classifier=Classifier(cfg,pcm,cache)
         resources.callback(classifier.close)
-        with scope('背景音乐检查',0,.15):
+        with scope('背景音乐检查',0,.1):
             music=classifier.music_intervals(meta['analysis_duration'])
-        with scope('人声、休息与突兀声音检查',.15,.4):
+        with scope('人声、休息与突兀声音检查',.1,.3):
             exclusions=classifier.exclusions(speech,music,meta['analysis_duration'])
         from .semantic import confirm,SoundMatcher
         from .transitions import review_transitions
         from .drinking import review_drinking
+        from .whispering import detect as detect_whispers,subtract
         classifier.close()
         with SoundMatcher(cfg,pcm,cache) as matcher:
-            with scope('饮水与瓶盖动作检查',.4,.65):
+            with scope('轻语 / 耳语保留检查',.3,.45):
+                whispers,exclusions['whisper_review']=detect_whispers(cfg,pcm,cache,classifier,matcher,music,meta['analysis_duration'])
+                exclusions['whisper']=whispers
+                classifier.retained_whispers=whispers
+                speech={**speech,'spoken':subtract(speech['spoken'],whispers)}
+                exclusions['voice']=subtract(exclusions.get('voice',[]),whispers)
+            with scope('饮水与瓶盖动作检查',.45,.7):
                 drinks,exclusions['drinking_review']=review_drinking(
                     cfg,pcm,cache,matcher,speech,music,exclusions,meta['analysis_duration'])
                 exclusions['drinking']=merge(exclusions.get('drinking',[])+drinks)
-            with scope('音色中断检查',.65,.85 if cfg['mode']=='extract' else 1.):
+            with scope('音色中断检查',.7,.85 if cfg['mode']=='extract' else 1.):
                 exclusions['transitions'],exclusions['transition_review']=review_transitions(
                     cfg,pcm,cache,classifier,matcher,speech,music,exclusions,meta['analysis_duration'])
             if cfg['mode']=='extract':
@@ -105,6 +112,7 @@ def run(data):
             resources.callback(recognizer.close)
             try:found=recognizer.audit(pcm,plan['keep_frames'],plan['frame_seconds'])
             finally:recognizer.close()
+            found=subtract(found,whispers)
             save_json(cache/'audit-latest.json',{'new_candidates':found})
             if found:
                 event('log',f'复查发现 {len(found)} 处疑似话语，重新调整对应上下文边界。')

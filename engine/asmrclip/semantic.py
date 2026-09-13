@@ -23,6 +23,14 @@ PROMPTS={
   'The sound of a woman speaking and having a conversation.',
   'The sound of a woman whispering intelligible words into a microphone.',
   'The sound of emotional talking, shouting or exclaiming.'],
+ 'whisper_asmr':[
+  'The sound of soft breathy ASMR whispering very close to the ears.',
+  'The sound of a gentle quiet whispered voice speaking close to a microphone for ASMR.',
+  'The sound of intimate soft spoken ASMR, hushed whispering with audible breath.'],
+ 'normal_speech':[
+  'The sound of a woman talking in a normal conversational voice.',
+  'The sound of a livestream host chatting aloud with viewers.',
+  'The sound of emotional talking, shouting or calling out.'],
  'break':[
   'The sound of a person taking a sip of water from a cup and swallowing.',
   'The sound of inhaling an electronic cigarette, a sizzling hiss, and exhaling vapor.',
@@ -117,6 +125,7 @@ class SoundMatcher:
 def positive(record,seed=False,cfg=None):
     from .exclusions import strong_voice
     if record.get('quiet') or strong_voice(record):return False
+    if record.get('retained_whisper') and (cfg or {}).get('keep_whisper',True):return True
     cfg=cfg or {};s=record.get('semantic',{})
     targets=['mouth','surface'];competitors=['speech','break','other']
     for category in ('heartbeat','tapping'):
@@ -170,5 +179,7 @@ def confirm(cfg,pcm,cache,classifier,speech,music,exclusions,duration,matcher=No
     by_span={(r['start'],r['end']):r for r in scored}
     rows=[by_span.get((r['start'],r['end']),{**r,'semantic':{}}) for r in records]
     report=semantic_regions(rows,cfg);report['records']=rows
+    from .whispering import allowed,subtract
+    report['intervals']=merge(report['intervals']+subtract(allowed(cfg,exclusions),blocked))
     save_json(cache/'extraction-evidence.json',report)
     return report

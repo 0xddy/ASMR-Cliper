@@ -96,7 +96,7 @@ class DrinkingTests(unittest.TestCase):
     def test_keep_setting_and_environment_requirements_agree_for_all_modes(self):
         for mode in ('strict','relaxed','extract'):
             for retain in (True,False):
-                cfg=settings({'mode':mode,'keep_drinking':retain,'speech_model':'whisper-turbo','review_model_id':'whisper-large-v3'})
+                cfg=settings({'mode':mode,'keep_drinking':retain,'keep_whisper':False,'speech_model':'whisper-turbo','review_model_id':'whisper-large-v3'})
                 needs=mode=='extract' or not retain
                 self.assertEqual('clap' in required_components(cfg),needs)
                 self.assertEqual('neural' in required_components(cfg),needs)

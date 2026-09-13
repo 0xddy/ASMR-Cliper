@@ -578,7 +578,7 @@ void MainWindow::prompt() {
     std::wstring content=Wide(raw);
     if(strict) content+=L"\n\n当前界面参数：前余量 "+value(Before)+L" 秒；后余量 "+value(After)+L" 秒；最短连续片段 "+value(Minimum)+L" 秒；聊天合并间隔 "+value(DenseGap)+L" 秒。";
     content+=L"\n最长空窗期："+value(Silence)+L" 秒（按成片连续静音计，包括跨片段接缝）。";
-    content+=L"\n\n当前保留声音（说话声始终删除）：";
+    content+=L"\n\n当前保留声音（普通说话仍删除）：";
     bool any=false;
     for(auto [id,key]:SoundOptions)if(SendMessageW(control(id),BM_GETCHECK,0,0)==BST_CHECKED){if(any)content+=L"、";content+=value(id);any=true;}
     if(!any)content+=L"无";
