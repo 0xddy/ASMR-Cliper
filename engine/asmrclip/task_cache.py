@@ -105,7 +105,7 @@ def payload_files(cache):
                 dirs[:] = [d for d in dirs if plain(folder / d)]
                 for name in files:
                     item = folder / name
-                    sound_cache=(folder.parent==path and re.fullmatch(r'sounds-[0-9a-f]{20}',folder.name)
+                    sound_cache=(folder.parent==path and re.fullmatch(r'sounds-(?:pcm-1-)?[0-9a-f]{20}',folder.name)
                                  and name.removesuffix('.tmp') in ('acoustic-cache.json','semantic-cache.json'))
                     if (re.fullmatch(r'[0-9a-f]{64}\.json(?:\.tmp)?', name) or sound_cache) and plain(item):
                         yield item

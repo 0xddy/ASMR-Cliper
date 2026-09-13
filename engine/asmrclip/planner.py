@@ -40,11 +40,14 @@ def scene_guard(probes, edge, side, tail_limit=None):
             reason.append('出现连续非语言声音')
             break
         if (breath>.045 and breath>texture*1.5) or (voice>.45 and texture<.075 and not laugh_kind(p)):
-            guard = p['end'] if side == 'start' else p['start']
+            tail = p['end'] if side == 'start' else p['start']
             reason.append('避开与话语相连的呼吸或发声尾音')
             if tail_limit is not None:
-                guard=min(guard,edge+tail_limit) if side=='start' else max(guard,edge-tail_limit)
+                # Limit weak tails without undoing an earlier strong-voice cut.
+                tail=min(tail,edge+tail_limit) if side=='start' else max(tail,edge-tail_limit)
+                guard=max(guard,tail) if side=='start' else min(guard,tail)
                 break
+            guard=tail
     return guard, reason
 
 

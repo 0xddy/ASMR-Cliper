@@ -1,5 +1,6 @@
 """Resolve ASR / sound-type conflicts on the actual candidate audio."""
 import copy
+import hashlib
 from pathlib import Path
 import numpy as np
 from .common import event
@@ -43,9 +44,12 @@ def verify(path,review,cfg):
     from .semantic import SoundMatcher
     from .progress import scope,advance
     result=copy.deepcopy(review)
-    cache=Path(cfg.get('_task_cache',Path(cfg['cache_dir'])/'export-review'))/'review-results'/('sounds-'+review['candidate_payload_sha256'][:20])
-    cache.mkdir(parents=True,exist_ok=True)
     pcm=decode_review_audio(path,True);duration=len(pcm)/16000
+    # Packet payloads exclude timestamps. Re-muxing the same packets can move
+    # samples or insert timeline gaps, so bind window caches to decoded PCM.
+    identity=hashlib.sha256(pcm).hexdigest()[:20]
+    cache=Path(cfg.get('_task_cache',Path(cfg['cache_dir'])/'export-review'))/'review-results'/('sounds-pcm-1-'+identity)
+    cache.mkdir(parents=True,exist_ok=True)
     contexts=[];probes=[];groups=[]
     for r in candidates:
         middle=(r['start']+r['end'])/2

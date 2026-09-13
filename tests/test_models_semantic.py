@@ -45,6 +45,17 @@ class ModelSemanticTests(unittest.TestCase):
         self.assertFalse(positive({**row(0,target=.3,other=.28),'texture':.002}))
         self.assertFalse(positive({**row(0,target=.65,other=.2),'texture':.002,'speech':.85}))
 
+    def test_qwen_review_requires_sound_model_independent_of_retention(self):
+        for mode in ('strict','relaxed'):
+            for speech in ('whisper-large-v3','qwen3-asr'):
+                for review in ('whisper-large-v3','qwen3-asr'):
+                    for enabled in (False,True):
+                        with self.subTest(mode=mode,speech=speech,review=review,enabled=enabled):
+                            cfg={'mode':mode,'speech_model':speech,'review_model_id':review,
+                                 'review_enabled':enabled,'keep_drinking':True,'keep_whisper':False}
+                            self.assertEqual('clap' in required_components(cfg),enabled and review=='qwen3-asr')
+        self.assertIn('clap',required_components({**cfg,'mode':'extract','review_enabled':False}))
+
     def test_v4_does_not_bridge_rejected_or_unknown_audio(self):
         rows=[row(a) for a in range(0,45,5)];rows[4]=row(20,target=.1,other=.4)
         intervals=semantic_regions(rows)['intervals']

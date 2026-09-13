@@ -11,12 +11,15 @@ VOICE_MODELS={
 def required_components(cfg):
     required={'python','dependencies','ast','ffmpeg'}
     ids=[cfg.get('speech_model','whisper-large-v3')]
-    if cfg.get('review_enabled',True) or cfg.get('mode')=='extract':ids.append(cfg.get('review_model_id','whisper-large-v3'))
+    reviewing=cfg.get('review_enabled',True) or cfg.get('mode')=='extract'
+    if reviewing:ids.append(cfg.get('review_model_id','whisper-large-v3'))
     for name in ids:
         if name not in VOICE_MODELS:raise ValueError('未知语音模型：'+str(name))
         required.add(VOICE_MODELS[name]['component'])
         if name=='qwen3-asr':required.update(('aligner','neural'))
-    if cfg.get('mode')=='extract' or not cfg.get('keep_drinking',False) or cfg.get('keep_whisper',True):required.update(('clap','neural'))
+    qwen_review=reviewing and cfg.get('review_model_id','whisper-large-v3')=='qwen3-asr'
+    if cfg.get('mode')=='extract' or not cfg.get('keep_drinking',False) or cfg.get('keep_whisper',True) or qwen_review:
+        required.update(('clap','neural'))
     return required
 
 

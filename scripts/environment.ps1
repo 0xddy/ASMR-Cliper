@@ -66,9 +66,12 @@ try {
         $primaryModel = if ($cfg.speech_model) { $cfg.speech_model } else { 'whisper-large-v3' }
         $reviewModel = if ($cfg.review_model_id) { $cfg.review_model_id } else { 'whisper-large-v3' }
         $requiredComponents += $modelComponents[$primaryModel]
-        if ($cfg.review_enabled -ne $false -or $cfg.mode -eq 'extract') { $requiredComponents += $modelComponents[$reviewModel] }
+        $reviewRequired = $cfg.review_enabled -ne $false -or $cfg.mode -eq 'extract'
+        if ($reviewRequired) { $requiredComponents += $modelComponents[$reviewModel] }
         if ($requiredComponents -contains 'qwen') { $requiredComponents += @('aligner','neural') }
-        if ($cfg.mode -eq 'extract') { $requiredComponents += @('clap','neural') }
+        if ($cfg.mode -eq 'extract' -or $cfg.keep_drinking -ne $true -or $cfg.keep_whisper -ne $false -or ($reviewRequired -and $reviewModel -eq 'qwen3-asr')) {
+            $requiredComponents += @('clap','neural')
+        }
         foreach ($entry in @(@('python','Python 运行时'),@('dependencies','分析依赖'),@('whisper','Whisper Turbo'),@('review','Whisper large-v3'),@('qwen','Qwen3-ASR-1.7B'),@('aligner','Qwen 时间定位'),@('clap','ASMR 声音识别'),@('neural','Qwen / ASMR 识别依赖'),@('ast','声音分类模型'),@('ffmpeg','FFmpeg'),@('gpu','GPU 加速'))) {
             $state = @{id=$entry[0]; name=$entry[1]; status='missing'; detail='安装 Python 后检查并复用已有组件'; required=($requiredComponents -contains $entry[0])}
             if ($entry[0] -eq 'python') { $state.detail = '缺少可用的项目 Python 3.12 运行时' }

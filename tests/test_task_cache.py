@@ -52,6 +52,8 @@ class TaskCacheTests(unittest.TestCase):
                  'plan-extract.json', 'review-results/' + 'a' * 64 + '.json',
                  'review-results/sounds-' + 'c' * 20 + '/acoustic-cache.json',
                  'review-results/sounds-' + 'c' * 20 + '/semantic-cache.json.tmp',
+                 'review-results/sounds-pcm-1-' + 'd' * 20 + '/acoustic-cache.json',
+                 'review-results/sounds-pcm-1-' + 'd' * 20 + '/semantic-cache.json.tmp',
                  'review-results/chunks/' + 'b' * 64 + '.json', 'inference-test/audio.npy']
         for name in names:
             path = task / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'intermediate')

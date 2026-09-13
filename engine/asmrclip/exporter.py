@@ -136,7 +136,12 @@ def validate_decode(path, ffmpeg, report):
     command = [str(ffmpeg), '-hide_banner', '-v', 'error', '-xerror', '-nostdin', '-nostats',
                '-progress', 'pipe:1', '-threads:v', '2', '-threads:a', '2',
                '-filter_threads', '1', '-filter_complex_threads', '1', '-i', str(path),
-               '-map', '0:a:0', '-map', '0:v:0?', '-f', 'null', '-']
+               '-map', '0:a:0', '-map', '0:v:0?',
+               # The null output still encodes timestamps. Its default video
+               # clock is 1/frame_rate, which collapses closely spaced VFR
+               # pictures into duplicate DTS even when the media is valid.
+               # Decode every picture on the input clock without frame sync.
+               '-fps_mode:v', 'passthrough', '-enc_time_base:v', '-1', '-f', 'null', '-']
     run_ffmpeg(command, '最终成片完整解码校验', report['duration'], (98, 99))
 
 
@@ -255,7 +260,8 @@ def export(source, output_dir, meta, frames, plan, cfg, source_fingerprint, revi
             event('log',f"成片仍有超过 {cfg.get('max_pause_seconds',1.5):g} 秒的低电平空窗，位置已记入空窗检查.csv。")
         report['join_review_count']=sum(r['review_suggested'] for r in report['joins'])
         validate_decode(staging/filename,cfg['ffmpeg'],report)
-        report['decode_validation']={'scope':'final_output_only','video_threads':2,'audio_threads':2}
+        report['decode_validation']={'scope':'final_output_only','video_threads':2,'audio_threads':2,
+                                    'video_timestamps':'source_time_base_passthrough'}
         report['audio_preparation']=meta.get('audio_preparation',{'method':'cached_or_direct_audio_only'})
         report['speech_review']['previous_passes']=plan.get('review_passes',[])
         report.update(source=str(source.resolve()),mode=cfg['mode'],output=str(final_dir/filename),decode_verified=True,

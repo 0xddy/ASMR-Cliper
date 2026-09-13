@@ -223,6 +223,28 @@ void MainWindow::testControls() {
     auto visible=[&](int id) {return (GetWindowLongPtrW(control(id),GWL_STYLE)&WS_VISIBLE)!=0;};
     auto checked=[&](int id) {return SendMessageW(control(id),BM_GETCHECK,0,0)==BST_CHECKED;};
     const auto folder=std::filesystem::path(Wide(options_["test-controls"])).parent_path();
+    {
+        const auto settings=cfg_;const auto components=components_;
+        cfg_["keep_whisper"]=false;cfg_["keep_drinking"]=true;
+        bool dependenciesCorrect=true;
+        for(const auto* mode:{"strict","relaxed"})for(const auto* speech:{"whisper-large-v3","qwen3-asr"})
+            for(const auto* review:{"whisper-large-v3","qwen3-asr"})for(bool enabled:{false,true}) {
+                cfg_["mode"]=mode;cfg_["speech_model"]=speech;cfg_["review_model_id"]=review;cfg_["review_enabled"]=enabled;
+                const auto required=requiredComponents();
+                const bool needsClap=std::find(required.begin(),required.end(),"clap")!=required.end();
+                dependenciesCorrect=dependenciesCorrect&&(needsClap==(enabled&&std::string(review)=="qwen3-asr"));
+            }
+        check("Qwen review requires CLAP independently of initial ASR and retention switches",dependenciesCorrect);
+        components_.clear();
+        for(const auto& key:requiredComponents())components_[key]={{"status","ready"}};
+        components_["clap"]["status"]="missing";
+        check("missing CLAP prevents ready status for Qwen final review",!environmentReady());
+        components_["clap"]["status"]="ready";
+        check("installed CLAP completes Qwen review environment",environmentReady());
+        cfg_["mode"]="extract";cfg_["review_enabled"]=false;components_["clap"]["status"]="missing";
+        check("mandatory V4 review still requires CLAP with review preference off",!environmentReady());
+        cfg_=settings;components_=components;
+    }
     selectPage(0);SendMessageW(control(OutputKind),CB_SETCURSEL,2,0);readSettings();
     check("video output choice reaches job settings",cfg_["output_kind"]=="video");
     populateSettings();check("output choice round trip",SendMessageW(control(OutputKind),CB_GETCURSEL,0,0)==2);
