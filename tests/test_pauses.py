@@ -2,10 +2,10 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-import tempfile
 import unittest
 
 import numpy as np
+import test_media
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'engine'))
@@ -77,19 +77,12 @@ class PausePlanningTests(unittest.TestCase):
         self.assertLessEqual(max((b-a for a,b in spans),default=0)*.01,1.5)
 
 
-class PauseExportTests(unittest.TestCase):
-    def setUp(self):
-        if not FFMPEG.exists():self.skipTest('FFmpeg required')
-        self.temp=tempfile.TemporaryDirectory(prefix='ASMR 空窗 ');self.addCleanup(self.temp.cleanup)
-        self.folder=Path(self.temp.name)
-
+class PauseExportTests(test_media.MediaFixture,unittest.TestCase):
     def source(self,video=False):
-        path=self.folder/('source.mp4' if video else 'source.m4a')
         command=[str(FFMPEG),'-v','error','-f','lavfi','-i',
                  "aevalsrc='if(between(t,7,9.8),0,0.06*sin(2*PI*357*t))':s=48000:d=18"]
         if video:command+=['-f','lavfi','-i','testsrc2=size=160x96:rate=25:duration=18','-map','1:v:0','-map','0:a:0','-c:v','libx264','-g','25','-bf','3','-sc_threshold','0']
-        subprocess.run(command+['-ac','2','-c:a','aac',str(path)],check=True,stderr=subprocess.PIPE)
-        return path
+        return self.fixture(command+['-ac','2','-c:a','aac'],'mp4' if video else 'm4a')
 
     def independent_silence_check(self,path):
         run=subprocess.run([str(FFMPEG),'-hide_banner','-nostdin','-i',str(path),'-map','0:a:0','-af',

@@ -18,36 +18,18 @@ class ReviewSoundTests(unittest.TestCase):
         self.assertEqual(decision(self.whisper,[self.whisper],True),'whisper')
         self.assertEqual(decision(self.whisper,[self.whisper],False),'speech')
 
-    def test_mouth_conflict_is_listening_review_not_whisper_permission(self):
-        self.assertEqual(decision(self.mouth,[self.mouth,self.mouth],True),'conflict')
-        self.assertEqual(decision({**self.mouth,'voiced':.6},[self.mouth],True),'speech')
-
     def test_normal_or_mixed_speech_cannot_be_cancelled_by_asmr_context(self):
         normal={'semantic':{'normal_speech':.7,'whisper_asmr':.4,'mouth':.3}}
         self.assertEqual(decision(self.whisper,[self.whisper,normal],True),'speech')
         self.assertEqual(decision({**self.whisper,'voiced':.6},[self.whisper],True),'speech')
         self.assertEqual(decision(self.mouth,[self.mouth,normal],True),'speech')
-
-    def test_candidate_verification_keeps_raw_asr_unchanged(self):
-        raw={'model':'Qwen3-ASR-1.7B','status':'speech_found','candidate_payload_sha256':'a'*64,
-             'findings':[{'start':5,'end':5.5,'text':'possible words'}]}
-        original=copy.deepcopy(raw)
-        classifier=Mock();classifier.windows.side_effect=lambda spans:[{'start':a,'end':b,**self.mouth} for a,b in spans]
-        matcher=Mock();matcher.available.return_value=True
-        matcher.score.side_effect=lambda rows,*args:[{**r,**self.mouth} for r in rows]
-        with tempfile.TemporaryDirectory() as directory,patch('asmrclip.reviewer.decode_review_audio',return_value=np.ones(20*16000,np.int16)), \
-                patch('asmrclip.classifier.Classifier',return_value=classifier),patch('asmrclip.semantic.SoundMatcher') as factory:
-            factory.return_value.__enter__.return_value=matcher
-            result=verify('candidate.m4a',raw,{'cache_dir':directory,'_task_cache':directory})
-        self.assertEqual(raw,original)
-        self.assertTrue(result['findings'][0]['review_only'])
-        self.assertEqual(result['findings'][0]['start'],5)
-        self.assertEqual(result['allowed_whisper'],[])
+        self.assertEqual(decision({**self.mouth,'voiced':.6},[self.mouth],True),'speech')
 
     def test_sound_windows_cache_actual_pcm_and_reuse_identical_audio(self):
         from asmrclip.semantic import PROMPTS
         raw={'model':'Qwen3-ASR-1.7B','status':'speech_found','candidate_payload_sha256':'a'*64,
              'findings':[{'start':5,'end':5.5,'text':'possible words'}]}
+        original=copy.deepcopy(raw)
         # Identical payloads can have different PTS and therefore move samples
         # inside the same window. Keep length and total signal energy equal.
         first=np.zeros(20*16000,np.int16);first[:8*16000]=1000
@@ -79,7 +61,10 @@ class ReviewSoundTests(unittest.TestCase):
             self.assertEqual(paths[1],paths[2])
             self.assertGreater(after_changed,after_first)
             self.assertEqual(client.request.call_count,after_changed)
+        self.assertEqual(raw,original)
         self.assertTrue(old['findings'][0]['review_only'])
+        self.assertEqual(old['findings'][0]['start'],5)
+        self.assertEqual(old['allowed_whisper'],[])
         self.assertFalse(changed['findings'][0].get('review_only',False))
         self.assertEqual(reused['findings'],changed['findings'])
 

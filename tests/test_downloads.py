@@ -61,18 +61,21 @@ class DownloadTests(unittest.TestCase):
         with patch('download_support.time.sleep'):
             return download(self.base+path,self.dest,{'proxy_enabled':False},hash_value,len(PAYLOAD))
 
-    def test_resumes_range_and_verifies_complete_payload(self):
-        self.partial('/range');self.fetch('/range')
-        self.assertEqual(self.dest.read_bytes(),PAYLOAD);self.assertEqual(Handler.ranges[0][1],300000)
+    def test_partial_download_handles_range_support_and_identity(self):
+        cases=(('/range',DIGEST,300000),('/ignore',DIGEST,300000),('/range','0'*64,0))
+        for index,(path,identity,offset) in enumerate(cases):
+            with self.subTest(path=path,identity=identity):
+                self.dest=Path(self.tmp.name)/f'含空格 文件-{index}.bin'
+                Handler.ranges=[]
+                self.partial(path,identity);self.fetch(path)
+                self.assertEqual(self.dest.read_bytes(),PAYLOAD)
+                self.assertEqual(Handler.ranges[0][1],offset)
 
     def test_large_model_download_uses_bounded_resumable_ranges(self):
         with patch('download_support.LARGE_DOWNLOAD_THRESHOLD',1000000),patch('download_support.DOWNLOAD_CHUNK',262144):
             self.fetch('/chunks')
         self.assertEqual(self.dest.read_bytes(),PAYLOAD)
         self.assertEqual([n for _,n in Handler.ranges],list(range(0,len(PAYLOAD),262144)))
-
-    def test_server_ignoring_range_restarts_without_duplicate_bytes(self):
-        self.partial('/ignore');self.fetch('/ignore');self.assertEqual(self.dest.read_bytes(),PAYLOAD)
 
     def test_interrupted_response_retries_from_saved_offset(self):
         self.fetch('/disconnect');self.assertEqual(self.dest.read_bytes(),PAYLOAD)
@@ -82,9 +85,6 @@ class DownloadTests(unittest.TestCase):
         self.dest.write_bytes(b'existing file')
         with self.assertRaises(RuntimeError):self.fetch('/corrupt')
         self.assertEqual(self.dest.read_bytes(),b'existing file')
-
-    def test_changed_identity_discards_old_partial(self):
-        self.partial('/range','0'*64);self.fetch('/range');self.assertEqual(Handler.ranges[0][1],0)
 
     def test_verified_existing_file_never_contacts_network(self):
         self.dest.write_bytes(PAYLOAD);self.fetch('/range');self.assertEqual(Handler.ranges,[])

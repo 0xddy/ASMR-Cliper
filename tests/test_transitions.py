@@ -1,5 +1,6 @@
 """Do not turn spectral changes or unknown low-frequency sounds into deletions."""
 import json
+from itertools import product
 from pathlib import Path
 import sys
 import tempfile
@@ -99,17 +100,18 @@ class TransitionPolicyTests(unittest.TestCase):
         probes=[residue(8,12),residue(16,20),residue(12,16)]
         self.assertEqual(decision(probes,{})[0],'uncertain')
 
-    def test_all_modes_and_replanning_respect_only_confirmed_intervals(self):
+    def test_all_modes_and_replanning_respect_only_confirmed_sound_exclusions(self):
         class Texture:
             def windows(self,windows):return [asmr(a,b) for a,b in windows]
         rms=np.full(1600,.05,np.float32)
         for i in range(0,1600,20):rms[i:i+6]=.0003
-        report={'transitions':[[80,85]],'extraction':{'intervals':[[0,160]]},
-                'transition_review':{'candidates':[{'start':50,'end':55,'decision':'uncertain'}]}}
-        for mode in ('strict','relaxed','extract'):
-            cfg=settings({'mode':mode,'strict_min_section':5,'strict_dense_gap':0})
-            self.assertEqual(selected_exclusions(report,cfg),[[80,85]])
-            for speech in ([],[[110,113]]):
+        for category,mode,speech in product(('transitions','drinking'),('strict','relaxed','extract'),([],[[110,113]])):
+            with self.subTest(category=category,mode=mode,speech=speech):
+                review='transition_review' if category=='transitions' else 'drinking_review'
+                report={category:[[80,85]],'extraction':{'intervals':[[0,160]]},
+                        review:{'candidates':[{'start':50,'end':55,'decision':'uncertain'}]}}
+                cfg=settings({'mode':mode,'strict_min_section':5,'strict_dense_gap':0})
+                self.assertEqual(selected_exclusions(report,cfg),[[80,85]])
                 plan=make_plan({'frame_samples':1024,'sample_rate':10240},{'levels':np.c_[rms,rms]},
                     {'spoken':speech,'accepted':[]},[],cfg,Texture(),report)
                 self.assertTrue(plan['keep_frames'])

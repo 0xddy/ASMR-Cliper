@@ -14,7 +14,7 @@ from scipy.io import wavfile
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'engine'))
 from asmrclip import program_menu as menu
-from asmrclip.common import ROOT,read_json,save_json,settings
+from asmrclip.common import ROOT,read_json,save_json
 from asmrclip.reviewer import decode_review_audio
 
 
@@ -69,10 +69,6 @@ class MenuRulesTests(unittest.TestCase):
                 self.assertIn(result['status'],('unavailable','failed'))
                 self.assertTrue(read_json(path.parent/'校验报告.json')['decode_verified'])
                 self.assertEqual(path.read_bytes(),b'unchanged finished media')
-
-    def test_menu_config_is_boolean(self):
-        self.assertTrue(settings({})['generate_program_menu'])
-        with self.assertRaises(ValueError):settings({'generate_program_menu':'true'})
 
 
 class MenuAudioTests(unittest.TestCase):

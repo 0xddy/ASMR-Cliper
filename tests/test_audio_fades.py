@@ -1,13 +1,12 @@
 import hashlib
 import math
 from pathlib import Path
-import subprocess
 import sys
-import tempfile
 import unittest
 
 import av
 import numpy as np
+import test_media
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'engine'))
@@ -69,15 +68,8 @@ class FadeEnvelopeTests(unittest.TestCase):
             self.assertEqual(len(details),2)
 
 
-class FadeExportTests(unittest.TestCase):
-    def setUp(self):
-        if not FFMPEG.exists():self.skipTest('FFmpeg required')
-        self.temp=tempfile.TemporaryDirectory(prefix='ASMR 淡化 ');self.addCleanup(self.temp.cleanup)
-        self.folder=Path(self.temp.name)
-
+class FadeExportTests(test_media.MediaFixture,unittest.TestCase):
     def source(self,suffix='m4a',audio='aac',video=None,offset=False):
-        self.source_count=getattr(self,'source_count',0)+1
-        path=self.folder/(f'源 文件 {self.source_count}.'+suffix)
         command=[str(FFMPEG),'-v','error','-f','lavfi','-i',
                  "aevalsrc='if(lt(t,6),0.03,0.5)*sin(2*PI*337*t)':s=48000:d=12"]
         if video:
@@ -86,8 +78,7 @@ class FadeExportTests(unittest.TestCase):
             if video=='libx264':command+=['-bf','3','-sc_threshold','0']
         command+=['-c:a',audio,'-ac','2']
         if offset:command+=['-output_ts_offset','3']
-        subprocess.run(command+[str(path)],check=True,stderr=subprocess.PIPE)
-        return path
+        return self.fixture(command,suffix)
 
     def prepared(self,source):
         meta,frames=analyze(source,self.folder/('cache-'+source.name));dt=1024/meta['sample_rate']
@@ -120,23 +111,29 @@ class FadeExportTests(unittest.TestCase):
                 self.assertTrue((Path(report['output']).parent/'接缝淡化.csv').is_file())
 
     def test_video_frames_clocks_and_reviewed_audio_survive_final_mux(self):
-        for suffix,video,audio in [('mp4','libx264','aac'),('webm','libvpx-vp9','libopus')]:
-            with self.subTest(suffix=suffix):
-                source=self.source(suffix,audio,video,offset=True)
-                meta,frames=analyze(source,self.folder/('cache-'+suffix));dt=1024/meta['sample_rate']
-                plan={'keep_frames':[[math.ceil(1.3/dt),math.floor(5.6/dt)],[math.ceil(7.2/dt),math.floor(10.7/dt)]]}
+        cases=[('mp4','libx264','aac','source',True),('webm','libvpx-vp9','libopus','source',True),
+               ('mp4','libx264','aac','flac',False),('mp4','libx264','aac','pcm',False),
+               ('webm','libvpx-vp9','libopus','aac',False)]
+        references={}
+        for suffix,video,audio,selected,fade in cases:
+            with self.subTest(suffix=suffix,selected=selected,fade=fade):
+                source=self.source(suffix,audio,video,offset=True);meta,frames,plan=self.prepared(source)
                 reference=self.folder/('reference.'+suffix)
-                original_report=copy_media_packets(source,reference,meta,frames,plan,inspect_media(source))
+                if suffix not in references:
+                    references[suffix]=copy_media_packets(source,reference,meta,frames,plan,inspect_media(source))
                 seen=[]
                 class Review:
                     def inspect(self,path,report):
                         seen.append(report['payload_sha256']);return {'status':'passed','findings':[]}
-                cfg=settings({'join_fade_enabled':True,'mode':'extract','review_enabled':True})
+                cfg=settings({'join_fade_enabled':fade,'edge_fade_enabled':fade,'audio_output_codec':selected,
+                              'mode':'extract','review_enabled':True})
                 report=export(source,self.folder/'out',meta,frames,plan,cfg,fingerprint(source),Review())
-                self.assertEqual(report['mapping'],original_report['mapping'])
+                self.assertEqual(report['mapping'],references[suffix]['mapping'])
                 self.assertEqual(seen,[report['payload_sha256']]);self.assertTrue(report['reviewed_audio_payload_verified'])
                 self.assertTrue(report['video_payload_unchanged']);self.assertFalse(report['payload_unchanged'])
                 verify_stream_copy(reference,report['output'],'video')
+                self.assertEqual(report['audio_fades']['applied'],fade)
+                if selected!='source':self.assertTrue(report['output'].endswith('.mkv'))
                 self.assertTrue(report['decode_verified'])
 
     def test_encoder_failure_does_not_publish_or_modify_source(self):
@@ -205,24 +202,6 @@ class FadeExportTests(unittest.TestCase):
                         output=np.concatenate([x for _,x in pcm_blocks(report['output'],report)],axis=1)
                         np.testing.assert_allclose(output,original,atol=2e-7,rtol=0)
                     self.assertTrue(report['decode_verified'])
-
-    def test_selected_video_audio_formats_keep_every_picture_and_reviewed_audio_packet(self):
-        for suffix,video,audio,selected in [('mp4','libx264','aac','flac'),('mp4','libx264','aac','pcm'),('webm','libvpx-vp9','libopus','aac')]:
-            with self.subTest(selected=selected):
-                source=self.source(suffix,audio,video,offset=True);meta,frames,plan=self.prepared(source)
-                reference=self.folder/('reference-'+selected+'.'+suffix)
-                original=copy_media_packets(source,reference,meta,frames,plan,inspect_media(source))
-                seen=[]
-                class Review:
-                    def inspect(self,path,report):
-                        seen.append(report['payload_sha256']);return {'status':'passed','findings':[]}
-                cfg=settings({'audio_output_codec':selected,'edge_fade_enabled':False})
-                report=export(source,self.folder/'out',meta,frames,plan,cfg,fingerprint(source),Review())
-                self.assertTrue(report['output'].endswith('.mkv'));self.assertTrue(report['video_payload_unchanged'])
-                self.assertEqual(report['mapping'],original['mapping']);self.assertEqual(seen,[report['payload_sha256']])
-                self.assertTrue(report['reviewed_audio_payload_verified']);verify_stream_copy(reference,report['output'],'video')
-                self.assertFalse(report['audio_fades']['applied']);self.assertFalse(report['payload_unchanged'])
-                self.assertTrue(report['decode_verified'])
 
 
 if __name__=='__main__':unittest.main()

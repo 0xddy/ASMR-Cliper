@@ -13,9 +13,8 @@ import numpy as np
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'engine'))
 from asmrclip.common import settings
 from asmrclip.drinking import candidate,drink,probe_rows,review_drinking,sequences
-from asmrclip.exclusions import drinking_events,selected_exclusions
+from asmrclip.exclusions import drinking_events
 from asmrclip.model_catalog import required_components
-from asmrclip.planner import make_plan
 
 
 def row(start,kind='drink',**scores):
@@ -124,23 +123,5 @@ class DrinkingTests(unittest.TestCase):
                 self.assertTrue(all(r['end']<=15 or r['start']>=30 for r in call.args[0]))
             saved=json.loads((folder/'drinking-review.json').read_text('utf8'))
             self.assertEqual(saved['removed'],found)
-
-    def test_every_mode_and_speech_replanning_respects_confirmed_drinking(self):
-        class Texture:
-            def windows(self,windows):return [{'start':a,'end':b,'texture':.8,'breath':0.,'speech':0.,'semantic':{'mouth':.6}} for a,b in windows]
-        rms=np.full(1600,.05,np.float32)
-        for i in range(0,1600,20):rms[i:i+6]=.0003
-        exclusions={'drinking':[[80,85]],'extraction':{'intervals':[[0,160]]},
-                    'drinking_review':{'candidates':[{'start':50,'end':55,'decision':'uncertain'}]}}
-        for mode in ('strict','relaxed','extract'):
-            cfg=settings({'mode':mode,'strict_min_section':5,'strict_dense_gap':0})
-            self.assertEqual(selected_exclusions(exclusions,cfg),[[80,85]])
-            for speech in ([],[[110,113]]):
-                plan=make_plan({'frame_samples':1024,'sample_rate':10240},{'levels':np.c_[rms,rms]},
-                    {'spoken':speech,'accepted':[]},[],cfg,Texture(),exclusions)
-                self.assertTrue(plan['keep_frames'])
-                self.assertFalse(any(min(b*.1,85)>max(a*.1,80) for a,b in plan['keep_frames']))
-                self.assertTrue(any(a*.1<=50 and b*.1>=55 for a,b in plan['keep_frames']))
-
 
 if __name__=='__main__':unittest.main()

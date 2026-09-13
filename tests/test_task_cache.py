@@ -80,28 +80,26 @@ class TaskCacheTests(unittest.TestCase):
         with cache.cache_lock(task): result = cache.finish(self.cfg, task, self.folder / 'missing.m4a')
         self.assertEqual(result['status'], 'partial'); self.assertTrue((task / 'analysis.wav').exists())
 
-    def test_recent_interrupted_tasks_survive_until_retry_and_expired_tasks_are_pruned(self):
-        recent = self.task('recent', age=60)
-        expired = self.task('expired', age=cache.RETENTION_SECONDS + 10)
-        result = self.maintain()
-        self.assertEqual(result['freed_bytes'], 100)
-        self.assertTrue((recent / 'analysis.wav').exists()); self.assertFalse((expired / 'analysis.wav').exists())
-
-    def test_capacity_evicts_oldest_inactive_tasks_first_including_menu_windows(self):
-        oldest = self.task('oldest', age=300, size=120)
-        second = self.task('second', age=200, size=100, menu=True)
-        newest = self.task('newest', age=100, size=80)
-        result = self.maintain(budget=190)
-        self.assertEqual(result['freed_bytes'], 120)
-        self.assertFalse((oldest / 'analysis.wav').exists()); self.assertTrue((second / 'menu-windows.json').exists())
-        self.assertTrue((newest / 'analysis.wav').exists())
-
-    def test_completed_work_is_removed_before_older_retry_data_under_capacity_pressure(self):
-        retry = self.task('retry', age=300, size=80)
-        finished = self.task('finished', age=20, size=100, status='completed')
-        result = self.maintain(budget=100)
-        self.assertEqual(result['freed_bytes'], 100)
-        self.assertTrue((retry / 'analysis.wav').exists()); self.assertFalse((finished / 'analysis.wav').exists())
+    def test_eviction_policy_preserves_useful_retry_data(self):
+        cases = [
+            ('expired', [{'label':'recent','age':60}, {'label':'old','age':cache.RETENTION_SECONDS+10}], {}, 4096, {'old'}),
+            ('capacity', [{'label':'old','age':300,'size':120}, {'label':'menu','age':200,'menu':True},
+                          {'label':'recent','age':100,'size':80}], {'budget':190}, 4096, {'old'}),
+            ('finished_first', [{'label':'retry','age':300,'size':80},
+                                {'label':'done','age':20,'status':'completed'}], {'budget':100}, 4096, {'done'}),
+            ('disk_pressure', [{'label':'recent'}], {}, 0, {'recent'}),
+        ]
+        parent = self.root
+        for name, specs, limits, free, expected in cases:
+            with self.subTest(policy=name):
+                self.root = parent / name; self.root.mkdir()
+                self.cfg = {**self.cfg, 'cache_dir':str(self.root)}
+                files = {r['label']:self.task(**r)/('menu-windows.json' if r.get('menu') else 'analysis.wav') for r in specs}
+                usage = type('Usage', (), {'free':free})()
+                with patch.object(cache.shutil, 'disk_usage', return_value=usage):
+                    result = cache.maintain(self.cfg, now=self.now, min_free=1024, completed=set(), **limits)
+                self.assertEqual({label for label, path in files.items() if not path.exists()}, expected)
+                self.assertEqual(result['freed_bytes'], sum(r.get('size',100) for r in specs if r['label'] in expected))
 
     def test_receipt_write_failure_preserves_actual_freed_byte_count(self):
         task = self.task()
@@ -118,13 +116,6 @@ class TaskCacheTests(unittest.TestCase):
         self.assertEqual(result['active_skipped'], 1)
         self.assertTrue((active / 'analysis.wav').exists()); self.assertTrue((retry / 'analysis.wav').exists())
         self.assertFalse((inactive / 'analysis.wav').exists())
-
-    def test_disk_pressure_reclaims_inactive_caches_before_the_age_limit(self):
-        task = self.task()
-        usage = type('Usage', (), {'free': 0})()
-        with patch.object(cache.shutil, 'disk_usage', return_value=usage):
-            result = cache.maintain(self.cfg, now=self.now, min_free=1024, completed=set())
-        self.assertEqual(result['freed_bytes'], 100); self.assertFalse((task / 'analysis.wav').exists())
 
     def test_completed_receipt_cleans_leftovers_and_legacy_history_requires_no_new_retry(self):
         finished = self.task('finished', status='completed')

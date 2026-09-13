@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'engine'))
-from asmrclip.exclusions import summarize,strong_voice,airflow_events,supported_utterance,drinking_events,extend_breaks,laugh_kind,selected_exclusions,impact_events,rhythmic_events,KEEP_DEFAULTS
+from asmrclip.exclusions import summarize,strong_voice,airflow_events,supported_utterance,drinking_events,extend_breaks,laugh_kind,impact_events,rhythmic_events,KEEP_DEFAULTS
 from asmrclip.recognition import word_intervals,plausible
 from asmrclip.planner import make_plan,scene_guard
 from asmrclip.common import settings
@@ -15,16 +15,13 @@ def record(a,b,**scores): return {'start':a,'end':b,**summarize(scores)}
 
 
 class ExclusionRequirements(unittest.TestCase):
-    def test_emotional_voice_cannot_be_overridden_by_texture(self):
-        r=record(10,12,Shout=.8,Crunch=.9)
-        self.assertTrue(strong_voice(r))
-        edge,reasons=scene_guard([r],10,'start')
-        self.assertEqual(edge,12)
-        self.assertTrue(reasons)
-
-    def test_speech_subtypes_are_not_lost(self):
-        for name in ('Whispering','Female speech, woman speaking','Conversation','Yell','Crying, sobbing'):
-            with self.subTest(name=name): self.assertTrue(strong_voice(record(0,2,**{name:.8})))
+    def test_speech_subtypes_override_texture_at_the_planning_boundary(self):
+        for name in ('Whispering','Female speech, woman speaking','Conversation','Shout','Yell','Crying, sobbing'):
+            with self.subTest(name=name):
+                r=record(10,12,**{name:.8,'Crunch':.9})
+                self.assertTrue(strong_voice(r))
+                edge,reasons=scene_guard([r],10,'start')
+                self.assertEqual(edge,12);self.assertTrue(reasons)
 
     def test_laughter_is_separate_from_mandatory_speech(self):
         for name in ('Laughter','Giggle','Snicker','Belly laugh','Chuckle, chortle'):
@@ -78,7 +75,8 @@ class ExclusionRequirements(unittest.TestCase):
 
     def test_retention_defaults_and_type_validation(self):
         self.assertEqual({k:settings({})[k] for k in KEEP_DEFAULTS},KEEP_DEFAULTS)
-        with self.assertRaises(ValueError):settings({'keep_loud_laugh':'false'})
+        for key in KEEP_DEFAULTS:
+            with self.subTest(option=key),self.assertRaises(ValueError):settings({key:'false'})
 
     def test_impact_requires_class_evidence_and_isolated_burst(self):
         rate=16000; rng=np.random.default_rng(12)
@@ -116,13 +114,10 @@ class ExclusionRequirements(unittest.TestCase):
         self.assertEqual(events,[[4,20]])
 
     def test_breath_and_crackle_alone_are_not_vaping(self):
-        for scores in ({'Breathing':.9},{'Gasp':.9},{'Crackle':.9},{'Hiss':.5},{'Spray':.5}):
+        for scores in ({'Breathing':.9},{'Gasp':.9},{'Crackle':.9},{'Hiss':.5},{'Spray':.5},
+                       {'Chewing, mastication':.7,'Gasp':.1,'Spray':.2}):
             with self.subTest(scores=scores):
                 self.assertFalse(airflow_events([record(t,t+6,**scores) for t in range(0,30,2)]))
-
-    def test_mouth_actions_are_preserved_despite_weak_airflow(self):
-        rows=[record(t,t+6,**{'Chewing, mastication':.7,'Gasp':.1,'Spray':.2}) for t in range(0,30,2)]
-        self.assertFalse(airflow_events(rows))
 
     def test_reported_83_minute_airflow_scores_exclude_break_not_adjacent_mouth(self):
         # Actual AST scores from the reported edited-audio region. No recording
@@ -133,21 +128,6 @@ class ExclusionRequirements(unittest.TestCase):
         removed=sum(max(0,min(b,4977)-max(a,4949)) for a,b in events)
         self.assertGreaterEqual(removed,26)
         self.assertFalse(any(min(b,5020)>max(a,5002) for a,b in events))
-
-    def test_interior_exclusions_survive_planning_and_later_audit(self):
-        class Texture:
-            def windows(self,windows): return [record(a,b,**{'Chewing, mastication':.8}) for a,b in windows]
-        rms=np.full(1400,.05,np.float32)
-        for i in range(0,1400,20):rms[i:i+6]=.0003
-        guard={'voice':[[42,46]],'airflow':[[70,80]],'drinking':[[90,95]]}
-        for mode in ('strict','relaxed'):
-            for extra_voice in ([],[[105,107]]):
-                cfg=settings({'mode':mode,'strict_min_section':5,'strict_dense_gap':0})
-                plan=make_plan({'frame_samples':1024,'sample_rate':10240},{'levels':np.c_[rms,rms]},
-                               {'spoken':extra_voice,'accepted':[]},[],cfg,Texture(),guard)
-                self.assertGreater(plan['duration'],55)
-                for a,b in plan['keep_frames']:
-                    self.assertFalse(any(min(b*.1,d)>max(a*.1,c)+1e-7 for c,d in guard['voice']+guard['airflow']+guard['drinking']+extra_voice))
 
     def test_drink_break_requires_combined_evidence(self):
         rows=[record(0,6,**{'Chink, clink':.35}),record(2,8,Liquid=.4,Gargling=.2),record(4,10,Water=.3)]

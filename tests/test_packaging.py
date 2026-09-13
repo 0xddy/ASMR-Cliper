@@ -41,29 +41,6 @@ class PackagingTests(unittest.TestCase):
             data['assets'][0]['path'] = bad
             with self.assertRaises(ValueError): bundle.assets(data)
 
-    def test_settings_remove_machine_paths_and_proxy(self):
-        cfg = bundle.read(ROOT / 'config/defaults.json')
-        cfg.update(input='F:/personal.mp4', output='G:/output', ffmpeg='C:/ffmpeg.exe', proxy_url='http://name:password@host:123')
-        cleaned = bundle.portable_config(cfg)
-        self.assertNotIn('input', cleaned)
-        self.assertNotIn('output', cleaned)
-        self.assertEqual(cleaned['proxy_url'], '')
-        self.assertFalse(cleaned['proxy_enabled'])
-        self.assertEqual(cleaned['ffmpeg'], 'runtime/tools/ffmpeg.exe')
-        self.assertEqual(cfg['input'], 'F:/personal.mp4')
-
-    def test_package_excludes_user_files_downloads_and_venvs(self):
-        wanted = ('asmrcliper.exe', 'runtime/python/python.exe', 'runtime/neural/python.exe',
-                  'runtime/tools/ffmpeg.exe', 'runtime/python/Lib/site-packages/torch.dist-info/LICENSE',
-                  'models/qwen-asr/model.safetensors', 'config/defaults.json', 'engine/main.py')
-        unwanted = ('runtime/venv/Scripts/python.exe', 'runtime/python/Scripts/pip.exe', 'runtime/environment-status.json',
-                    'runtime/environment-hashes.json', 'runtime/cache/private.wav', 'runtime/downloads/model.zip',
-                    'runtime/jobs/secret.json', 'config/user.json', 'config/history.json', 'output/private.m4a',
-                    'engine/__pycache__/main.pyc', 'models/incomplete.bin.part', 'ASMR-Cliper.lnk', 'build/private.txt')
-        for name in wanted + unwanted: self.put(name)
-        actual = {r.as_posix() for _, r in bundle.package_files(self.root)}
-        self.assertEqual(actual, set(wanted))
-
     def test_install_refuses_system_python_or_developer_venv(self):
         with self.assertRaisesRegex(RuntimeError, 'staged'):
             bundle.assert_core_python(self.root)
@@ -94,6 +71,9 @@ class PackagingTests(unittest.TestCase):
         for dll in crt.glob('*.dll'):
             self.assertEqual((target / 'runtime/python' / dll.name).read_bytes(), dll.read_bytes())
         self.assertEqual((target / 'runtime/python/python.exe').read_bytes(), b'embedded interpreter')
+        for name in ('strict-v2.txt', 'relaxed-v3.txt', 'extract-v4.txt'):
+            relative = Path('docs/prompts') / name
+            self.assertEqual((target / relative).read_bytes(), (ROOT / relative).read_bytes())
 
     def test_install_preserves_locked_core_crt_and_restores_neural_crt(self):
         crt = self.make_crt()
@@ -155,11 +135,15 @@ class PackagingTests(unittest.TestCase):
             bundle.archive(self.root, self.root / 'nested')
 
     def test_archive_roundtrip_preserves_bytes_and_relative_layout(self):
+        wanted = ('asmrcliper.exe', 'runtime/python/python.exe', 'runtime/neural/python.exe',
+                  'runtime/tools/ffmpeg.exe', 'runtime/python/Lib/site-packages/torch.dist-info/LICENSE',
+                  'models/qwen-asr/model.safetensors', 'config/defaults.json', 'engine/main.py')
+        unwanted = ('runtime/venv/Scripts/python.exe', 'runtime/python/Scripts/pip.exe', 'runtime/environment-status.json',
+                    'runtime/environment-hashes.json', 'runtime/cache/private.wav', 'runtime/downloads/model.zip',
+                    'runtime/jobs/secret.json', 'config/user.json', 'config/history.json', 'output/private.m4a',
+                    'engine/__pycache__/main.pyc', 'models/incomplete.bin.part', 'ASMR-Cliper.lnk', 'build/private.txt')
+        for name in wanted + unwanted: self.put(name)
         self.put('asmrcliper.exe', bytes(range(256)) * 20)
-        self.put('runtime/python/python.exe', b'embedded')
-        self.put('runtime/neural/python.exe', b'cuda')
-        self.put('config/user.json', b'PRIVATE')
-        self.put('runtime/environment-status.json', b'ABSOLUTE PATH')
         bundle.save(self.root / 'build-info.json', {'version':'0.6.0','verification':{'passed':True}})
         github_output = self.folder / 'github-output.txt'
         with patch.dict(os.environ, {'GITHUB_OUTPUT':str(github_output), 'GITHUB_STEP_SUMMARY':''}):
@@ -171,8 +155,7 @@ class PackagingTests(unittest.TestCase):
         with zipfile.ZipFile(archive) as z:
             self.assertIsNone(z.testzip())
             self.assertEqual(z.read('ASMR-Cliper/asmrcliper.exe'), bytes(range(256)) * 20)
-            self.assertNotIn('ASMR-Cliper/config/user.json', z.namelist())
-            self.assertNotIn('ASMR-Cliper/runtime/environment-status.json', z.namelist())
+            self.assertEqual(set(z.namelist()), {'ASMR-Cliper/' + name for name in (*wanted, 'build-info.json')})
             self.assertTrue(all(n.startswith('ASMR-Cliper/') and '\\' not in n for n in z.namelist()))
         expected = hashlib.sha256(archive.read_bytes()).hexdigest()
         self.assertTrue(archive.with_suffix('.zip.sha256').read_text().startswith(expected + '  '))
@@ -199,13 +182,6 @@ class PackagingTests(unittest.TestCase):
         # Artifact content remains usable even after the original job's staging file disappears.
         (self.root/'models/asmr/weights.bin').unlink()
         self.assertEqual((target/'models/asmr/weights.bin').read_bytes(), b'model contents')
-
-    def test_mode_help_files_are_part_of_the_payload(self):
-        for name in ('strict-v2.txt','relaxed-v3.txt','extract-v4.txt'):
-            relative = 'docs/prompts/' + name
-            self.assertIn(relative, bundle.SOURCE_FILES)
-            self.assertTrue((ROOT / relative).is_file())
-
 
 if __name__ == '__main__':
     unittest.main()

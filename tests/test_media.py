@@ -1,6 +1,7 @@
 import hashlib
 import gc
 import math
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -18,36 +19,52 @@ from asmrclip.common import settings,fingerprint
 from asmrclip.media import inspect_media,copy_media_packets,source_intervals,video_groups
 from asmrclip.exporter import validate_decode
 from asmrclip.exporter import export
-from asmrclip.reviewer import decode_review_audio,mapped_output_to_source,SpeechRemaining
+from asmrclip.reviewer import decode_review_audio
 
 FFMPEG=ROOT/'runtime/tools/ffmpeg.exe'
 
 
-class MediaExportTests(unittest.TestCase):
+class MediaFixture:
+    """Reuse immutable encoded sources; keep outputs and analysis caches per test."""
+    @classmethod
+    def setUpClass(cls):
+        if not FFMPEG.exists():raise unittest.SkipTest('FFmpeg is required')
+        temp=tempfile.TemporaryDirectory(prefix='ASMR 源 fixture ')
+        cls.addClassCleanup(temp.cleanup)
+        cls.fixture_folder=Path(temp.name)
+
     def setUp(self):
-        if not FFMPEG.exists():self.skipTest('FFmpeg is required')
         self.temp=tempfile.TemporaryDirectory(prefix='ASMR video 中文 ')
         self.folder=Path(self.temp.name)
         self.addCleanup(self.temp.cleanup)
 
+    def fixture(self,command,extension):
+        key=hashlib.sha256('\0'.join(command).encode()).hexdigest()[:16]
+        path=self.fixture_folder/('源 文件 '+key+'.'+extension)
+        if not path.exists():
+            subprocess.run(command+[str(path)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+        source=self.folder/path.name
+        if not source.exists():shutil.copy2(path,source)
+        return source
+
+
+class MediaExportTests(MediaFixture,unittest.TestCase):
     def source(self,extension='mp4',video='libx264',audio='aac',extra=None):
-        path=self.folder/('源 视频.'+extension)
         command=[str(FFMPEG),'-v','error','-f','lavfi','-i','testsrc2=size=160x96:rate=25:duration=12',
                  '-f','lavfi','-i','sine=frequency=337:sample_rate=48000:duration=12',
                  '-map','0:v:0','-map','1:a:0','-c:v',video,'-g','25','-pix_fmt','yuv420p','-c:a',audio]
         if video=='libx264':command+=['-bf','3','-sc_threshold','0']
         elif video=='libx265':command+=['-x265-params','log-level=error:open-gop=0:keyint=25:min-keyint=25:pools=1']
         if extra:command+=extra
-        subprocess.run(command+[str(path)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
-        return path
+        return self.fixture(command,extension)
 
     def plan(self,source):
-        meta,frames=analyze(source,self.folder/'cache');dt=1024/meta['sample_rate']
+        meta,frames=analyze(source,self.folder/('cache-'+source.stem));dt=1024/meta['sample_rate']
         return meta,frames,{'keep_frames':[[math.ceil(1.3/dt),math.floor(5.6/dt)],
                                         [math.ceil(7.2/dt),math.floor(10.7/dt)]]}
 
     def verify_copy(self,source,meta,frames,plan):
-        media=inspect_media(source);target=self.folder/('result'+media['extension'])
+        media=inspect_media(source);target=self.folder/(source.stem+'-result'+media['extension'])
         report=copy_media_packets(source,target,meta,frames,plan,media)
         self.assertEqual(report['media_kind'],'video');self.assertTrue(report['video_payload_unchanged'])
         self.assertTrue(report['payload_unchanged']);self.assertEqual(report['segments'],2)
@@ -73,18 +90,16 @@ class MediaExportTests(unittest.TestCase):
         self.assertAlmostEqual(len(pcm)/16000,report['duration'],delta=.05)
         return report,target
 
-    def test_h264_b_frames_and_aac_are_copied_without_deleted_pictures(self):
-        source=self.source();self.verify_copy(source,*self.plan(source))
-
-    def test_hevc_closed_gops(self):
-        source=self.source(video='libx265');self.verify_copy(source,*self.plan(source))
-
-    def test_webm_vp9_opus(self):
-        source=self.source('webm','libvpx-vp9','libopus');self.verify_copy(source,*self.plan(source))
-
-    def test_variable_frame_rate_and_matroska(self):
-        source=self.source('mkv',extra=['-vf',"select='not(mod(n,2))+not(mod(n,5))'",'-fps_mode','vfr'])
-        self.verify_copy(source,*self.plan(source))
+    def test_packet_copy_preserves_approved_pictures_and_clock_across_formats(self):
+        cases=[('h264-b-frames','mp4','libx264','aac',[]),
+               ('hevc-closed-gops','mp4','libx265','aac',[]),
+               ('vp9-opus','webm','libvpx-vp9','libopus',[]),
+               ('vfr-matroska','mkv','libx264','aac',['-vf',"select='not(mod(n,2))+not(mod(n,5))'",'-fps_mode','vfr']),
+               ('shifted-clock','mp4','libx264','aac',['-output_ts_offset','3'])]
+        for name,extension,video,audio,extra in cases:
+            with self.subTest(case=name):
+                source=self.source(extension,video,audio,extra)
+                self.verify_copy(source,*self.plan(source))
 
     def test_mp3_audio_keeps_original_codec_in_matroska(self):
         source=self.folder/'audio.mp3'
@@ -94,31 +109,12 @@ class MediaExportTests(unittest.TestCase):
         self.assertTrue(report['output'].endswith('.mka'));self.assertTrue(report['payload_unchanged'])
         self.assertEqual(report['codec'],'mp3float')
 
-    def test_shifted_container_timestamps(self):
-        source=self.source(extra=['-output_ts_offset','3'])
-        self.verify_copy(source,*self.plan(source))
-
     def test_audio_output_from_video_preserves_old_aac_path(self):
         source=self.source();meta,frames,plan=self.plan(source)
         cfg=settings({'mode':'relaxed','output_kind':'audio','review_enabled':False,'edge_fade_enabled':False})
         report=export(source,self.folder/'out',meta,frames,plan,cfg,fingerprint(source))
         self.assertTrue(report['output'].endswith('.m4a'));self.assertTrue(report['payload_unchanged'])
         with av.open(report['output']) as result:self.assertEqual(len(result.streams.video),0)
-
-    def test_video_review_mapping_and_atomic_failure(self):
-        source=self.source();meta,frames,plan=self.plan(source)
-        class Reject:
-            def inspect(self,path,report):
-                self.report=report
-                return {'status':'speech_found','findings':[{'start':.2,'end':.4,'text':'hello'}]}
-        reviewer=Reject();cfg=settings({'mode':'extract','output_kind':'video'})
-        with self.assertRaises(SpeechRemaining) as caught:
-            export(source,self.folder/'out',meta,frames,plan,cfg,fingerprint(source),reviewer)
-        self.assertEqual(list((self.folder/'out').iterdir()),[])
-        mapping=caught.exception.report['export_mapping']
-        found=mapped_output_to_source(caught.exception.report['findings'],mapping)
-        self.assertAlmostEqual(found[0][0],mapping[0]['analysis_start']+.2)
-        self.assertNotAlmostEqual(found[0][0],plan['keep_frames'][0][0]*1024/meta['sample_rate']+.2)
 
     def test_no_keyframe_interval_is_not_published(self):
         source=self.source();meta,frames,_=self.plan(source)

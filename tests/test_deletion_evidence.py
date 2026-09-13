@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'engine'))
-from asmrclip.recognition import qwen_speech,qwen_alignment_issue,word_intervals
+from asmrclip.recognition import qwen_speech,qwen_alignment_issue
 from asmrclip.planner import dense_conversations
 from asmrclip.reviewer import mapped_output_to_source,output_to_source
 from asmrclip.output_paths import export_names,windows_length
@@ -14,31 +14,26 @@ class DeletionEvidenceTests(unittest.TestCase):
         return {'backend':'qwen3-asr','text':text,'start':a,'end':b,
                 'words':[{'word':text,'start':a,'end':b}],**extra}
 
-    def test_collapsed_japanese_phrase_is_not_deletion_evidence(self):
-        row=self.segment('今日は静かに話します',20,20.08)
-        self.assertFalse(qwen_speech(row));self.assertTrue(qwen_alignment_issue(row))
-        self.assertTrue(qwen_speech(self.segment('今日は静かに話します',20,22)))
-
-    def test_missing_alignment_words_are_not_hidden(self):
-        row=self.segment('お水を飲みます',10,12,alignment_total_words=8)
-        self.assertFalse(qwen_speech(row))
-
-    def test_single_syllable_cannot_delete_a_long_audio_window(self):
-        row=self.segment('静かに話します',0,25)
-        row['words']=[{'word':'た','start':0,'end':18},{'word':'話します','start':24,'end':25}]
-        self.assertFalse(qwen_speech(row))
-
-    def test_short_valid_words_still_count_as_speech(self):
-        self.assertTrue(qwen_speech(self.segment('はい',10,10.4)))
-        self.assertFalse(qwen_speech(self.segment('はい',10,10.08)))
+    def test_qwen_alignment_accepts_real_words_and_rejects_unreliable_positions(self):
+        stretched=self.segment('静かに話します',0,25)
+        stretched['words']=[{'word':'た','start':0,'end':18},{'word':'話します','start':24,'end':25}]
+        cases=[('collapsed phrase',self.segment('今日は静かに話します',20,20.08),False),
+               ('aligned phrase',self.segment('今日は静かに話します',20,22),True),
+               ('partial alignment',self.segment('お水を飲みます',10,12,alignment_total_words=8),False),
+               ('stretched syllable',stretched,False),
+               ('short word',self.segment('はい',10,10.4),True),
+               ('collapsed short word',self.segment('はい',10,10.08),False),
+               ('no alignment',self.segment('물 좀 마실게요',1,3,words=[]),False)]
+        for name,row,accepted in cases:
+            with self.subTest(case=name):
+                self.assertEqual(qwen_speech(row),accepted)
+                self.assertEqual(bool(qwen_alignment_issue(row)),not accepted)
+        for text in ('하하하','Thanks for watching'):
+            with self.subTest(nonlexical=text):self.assertFalse(qwen_speech(self.segment(text,1,3)))
 
     def test_sparse_interjections_cannot_chain_into_dense_chat(self):
         self.assertEqual(dense_conversations([[t,t+.3] for t in range(0,1200,28)]),[])
         self.assertTrue(dense_conversations([[t,t+5] for t in range(0,100,20)]))
-
-    def test_word_timing_does_not_remove_whole_inference_window(self):
-        row={'start':0,'end':28,'words':[{'start':1,'end':2},{'start':25,'end':26}]}
-        self.assertEqual(word_intervals([row]),[[1,2],[25,26]])
 
     def test_confirmed_continuous_asmr_can_use_enabled_fades(self):
         import numpy as np

@@ -131,9 +131,6 @@ class AppPackagingTests(unittest.TestCase):
         self.prepare()
         with self.assertRaisesRegex(ValueError, 'bin/ffprobe.exe'):
             self.install_ffmpeg(missing='bin/ffprobe.exe')
-        with self.assertRaisesRegex(ValueError, 'verified'):
-            app.archive(self.root, self.folder / 'artifacts')
-        self.assertFalse((self.folder / 'artifacts').exists())
 
     def test_unverified_or_wrong_target_cannot_be_archived(self):
         self.prepare()

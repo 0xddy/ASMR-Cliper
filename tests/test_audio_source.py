@@ -2,12 +2,12 @@ import hashlib
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
 import unittest
 from unittest.mock import patch
 
 import av
 import numpy as np
+import test_media
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'engine'))
@@ -16,27 +16,19 @@ from asmrclip.audio_source import extract_audio, verify_audio_copy, analyze_inpu
 from asmrclip.common import settings, fingerprint
 from asmrclip.exporter import export, validate_decode
 from asmrclip.media import inspect_media, copy_media_packets
-from asmrclip.reviewer import decode_review_audio, SpeechRemaining
+from asmrclip.reviewer import decode_review_audio, mapped_output_to_source, SpeechRemaining
 
 FFMPEG = ROOT / 'runtime/tools/ffmpeg.exe'
 
 
-class AudioFirstTests(unittest.TestCase):
-    def setUp(self):
-        if not FFMPEG.exists():self.skipTest('FFmpeg is required')
-        temp = tempfile.TemporaryDirectory(prefix='ASMR audio first 中文 ')
-        self.addCleanup(temp.cleanup)
-        self.folder = Path(temp.name)
-
-    def source(self, name='source', extension='mp4', audio='aac', extra=()):
-        path = self.folder / (name + '.' + extension)
+class AudioFirstTests(test_media.MediaFixture,unittest.TestCase):
+    def source(self, extension='mp4', audio='aac', extra=()):
         video = 'libvpx-vp9' if extension == 'webm' else 'libx264'
         command = [str(FFMPEG), '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=128x96:rate=25:duration=8',
                    '-f', 'lavfi', '-i', 'sine=frequency=337:sample_rate=48000:duration=8',
                    '-map', '0:v:0', '-map', '1:a:0', '-c:v', video, '-threads:v', '2', '-g', '25', '-c:a', audio]
         if video == 'libx264':command += ['-bf', '3', '-sc_threshold', '0']
-        subprocess.run(command + list(extra) + [str(path)], check=True, stderr=subprocess.PIPE)
-        return path
+        return self.fixture(command + list(extra), extension)
 
     def plan(self, source):
         meta, frames = analyze(source, self.folder / 'direct-cache')
@@ -47,7 +39,7 @@ class AudioFirstTests(unittest.TestCase):
         cases = [('mp4', 'aac', ()), ('mp4', 'aac', ('-output_ts_offset', '2.317')), ('mkv', 'aac', ()), ('webm', 'libopus', ())]
         for i, (extension, audio, extra) in enumerate(cases):
             with self.subTest(container=extension, offset=extra):
-                source = self.source(str(i), extension, audio, extra)
+                source = self.source(extension, audio, extra)
                 track, proof = extract_audio(source, self.folder / f'extract-{i}', FFMPEG)
                 with av.open(str(track)) as container:
                     self.assertEqual(len(container.streams.audio), 1)
@@ -103,15 +95,20 @@ class AudioFirstTests(unittest.TestCase):
                 return {'status':'speech_found', 'findings':[{'start':.1, 'end':.3, 'text':'speech'}]}
         cfg = settings({'mode':'extract', 'review_enabled':True})
         with patch('asmrclip.media.copy_media_packets', wraps=copy_media_packets) as copying, patch('asmrclip.exporter.validate_decode') as validation:
-            with self.assertRaises(SpeechRemaining):export(source, self.folder/'out', meta, frames, plan, cfg, fingerprint(source), Reject())
+            with self.assertRaises(SpeechRemaining) as caught:
+                export(source, self.folder/'out', meta, frames, plan, cfg, fingerprint(source), Reject())
         self.assertEqual([c.args[5]['kind'] for c in copying.call_args_list], ['audio'])
         validation.assert_not_called()
         self.assertEqual(list((self.folder/'out').iterdir()), [])
+        mapping=caught.exception.report['export_mapping']
+        found=mapped_output_to_source(caught.exception.report['findings'],mapping)
+        self.assertAlmostEqual(found[0][0],mapping[0]['analysis_start']+.1)
+        self.assertNotAlmostEqual(found[0][0],plan['keep_frames'][0][0]*1024/meta['sample_rate']+.1)
 
     def test_final_video_audio_is_identical_to_reviewed_audio(self):
         for i, (extension, audio) in enumerate((('mp4','aac'), ('mkv','aac'), ('webm','libopus'))):
             with self.subTest(container=extension):
-                source = self.source(str(i), extension, audio)
+                source = self.source(extension, audio)
                 meta, frames = analyze(source, self.folder/f'cache-{i}');dt = 1024/meta['sample_rate']
                 plan = {'keep_frames':[[int(1.3/dt),int(4.5/dt)],[int(5.2/dt),int(7.7/dt)]]}
                 class Approve:

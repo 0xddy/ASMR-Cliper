@@ -4,7 +4,6 @@ ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'engine'))
 from asmrclip.model_catalog import required_components
 from asmrclip.common import settings
 from asmrclip.semantic import semantic_regions,positive
-from asmrclip.recognition import plausible,qwen_speech
 
 
 def row(a,target=.30,other=.12,**extra):
@@ -71,12 +70,5 @@ class ModelSemanticTests(unittest.TestCase):
             self.assertFalse(semantic_regions(rows,{'keep_'+category:False})['intervals'])
             self.assertFalse(positive({**rows[0],'lexical':.9}))
             self.assertFalse(positive({**rows[0],'impact':.8}))
-
-    def test_qwen_uses_alignment_without_fake_whisper_confidence(self):
-        s={'backend':'qwen3-asr','text':'물 좀 마실게요','start':1,'end':3,'words':[{'word':'물','start':1,'end':2}]}
-        self.assertTrue(plausible(s,[]))
-        self.assertFalse(qwen_speech({**s,'words':[]}))
-        self.assertFalse(qwen_speech({**s,'text':'하하하'}))
-        self.assertFalse(qwen_speech({**s,'text':'Thanks for watching'}))
 
 if __name__=='__main__':unittest.main()

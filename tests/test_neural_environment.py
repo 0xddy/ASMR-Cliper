@@ -26,10 +26,13 @@ class NeuralEnvironmentTests(unittest.TestCase):
         self.runtime.mkdir(parents=True)
         (self.runtime / 'python.exe').touch()
         self.model_source = self.runtime / 'Lib/site-packages/nagisa/model.py'
+
+    def prepare_model(self, source=MODEL_SOURCE):
         self.model_source.parent.mkdir(parents=True)
-        self.model_source.write_text(MODEL_SOURCE, encoding='utf8')
+        self.model_source.write_text(source, encoding='utf8')
 
     def test_model_load_uses_relative_filename_and_preserves_cwd(self):
+        self.prepare_model()
         params = self.model_source.parent / 'data/nagisa_v001.model'
         params.parent.mkdir()
         params.write_bytes(b'model weights')
@@ -59,27 +62,25 @@ class NeuralEnvironmentTests(unittest.TestCase):
         self.assertEqual(Path.cwd(), original_cwd)
 
     def test_unrecognized_nagisa_source_fails_without_modifying_it(self):
-        self.model_source.write_text('unexpected upstream code', encoding='utf8')
+        self.prepare_model('unexpected upstream code')
         with self.assertRaisesRegex(RuntimeError, 'model.py'):
             neural.patch_nagisa_model_loader(self.root)
         self.assertEqual(self.model_source.read_text(encoding='utf8'), 'unexpected upstream code')
 
-    def test_probe_preserves_exit_code_stdout_and_traceback(self):
-        process = subprocess.CompletedProcess([], 1, b'Importing nagisa\n',
-                                              b'Traceback:\nRuntimeError: Could not read model\n')
-        with patch.object(neural.subprocess, 'run', return_value=process):
-            ok, detail, info = neural.inspect(self.root, {})
-        self.assertFalse(ok)
-        self.assertIn('依赖加载失败', detail)
-        for text in ('退出码 1', 'Importing nagisa', 'Traceback:', 'Could not read model'):
-            self.assertIn(text, info['error'])
-
-    def test_probe_preserves_native_crash_without_python_traceback(self):
-        process = subprocess.CompletedProcess([], 3221225477, b'', b'')
-        with patch.object(neural.subprocess, 'run', return_value=process):
-            ok, _, info = neural.inspect(self.root, {})
-        self.assertFalse(ok)
-        self.assertIn('3221225477', info['error'])
+    def test_probe_preserves_process_diagnostics(self):
+        cases = [('python exception', 1, b'Importing nagisa\n', b'Traceback:\nRuntimeError: Could not read model\n',
+                  ('退出码 1', 'Importing nagisa', 'Traceback:', 'Could not read model')),
+                 ('native crash', 3221225477, b'', b'', ('3221225477',)),
+                 ('invalid report', 0, b'invalid version report', b'native diagnostic',
+                  ('invalid version report', 'native diagnostic'))]
+        for name, code, stdout, stderr, expected in cases:
+            with self.subTest(case=name), patch.object(neural.subprocess, 'run',
+                    return_value=subprocess.CompletedProcess([], code, stdout, stderr)):
+                ok, detail, info = neural.inspect(self.root, {})
+                self.assertFalse(ok)
+                self.assertIn('依赖加载失败' if code else '依赖检测失败', detail)
+                for text in expected:
+                    self.assertIn(text, info['error'])
 
     def test_probe_preserves_timeout_output_and_startup_errors(self):
         errors = (subprocess.TimeoutExpired('python', 100, output=b'loading torch', stderr=b'stalled'),
@@ -101,15 +102,8 @@ class NeuralEnvironmentTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertFalse(info['cuda'])
 
-    def test_probe_preserves_output_when_version_report_is_invalid(self):
-        process = subprocess.CompletedProcess([], 0, b'invalid version report', b'native diagnostic')
-        with patch.object(neural.subprocess, 'run', return_value=process):
-            ok, _, info = neural.inspect(self.root, {})
-        self.assertFalse(ok)
-        self.assertIn('invalid version report', info['error'])
-        self.assertIn('native diagnostic', info['error'])
-
     def test_install_prepares_crt_before_children_and_patches_before_inspection(self):
+        self.prepare_model()
         manifest = {key: {'url': key, 'sha256': 'hash', 'size': 1} for key in ('python', 'pip')}
         dll = self.runtime / 'vcruntime140.dll'
 

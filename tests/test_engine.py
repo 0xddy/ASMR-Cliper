@@ -12,7 +12,7 @@ import av
 from asmrclip.common import settings
 from asmrclip.planner import make_plan
 from asmrclip.recognition import plausible,recover_jsonl
-from asmrclip.analysis import analyze,inspect_audio
+from asmrclip.analysis import analyze
 from asmrclip.exporter import copy_packets,export
 
 
@@ -38,12 +38,11 @@ class PlannerRequirements(unittest.TestCase):
         self.assertFalse(v3['dense_conversations'])
         self.assertGreater(v3['duration'],v2['duration']+30)
         self.assertTrue(any(23<=a*.1<b*.1<=42 for a,b in v3['keep_frames']))
-
-    def test_relaxed_has_no_mandatory_five_seven_second_padding(self):
-        plan=make_plan(self.meta,self.frames,self.speech,[],settings({'mode':'relaxed'}),StableTexture())
-        self.assertTrue(any(23<=a*.1<30 for a,b in plan['keep_frames']))
-        self.assertTrue(any(15<b*.1<=20 for a,b in plan['keep_frames']))
-        for a,b in plan['keep_frames']:
+        # Reuse this same relaxed plan to check that retained gaps do not
+        # inherit strict padding and still exclude every spoken interval.
+        self.assertTrue(any(23<=a*.1<30 for a,b in v3['keep_frames']))
+        self.assertTrue(any(15<b*.1<=20 for a,b in v3['keep_frames']))
+        for a,b in v3['keep_frames']:
             self.assertFalse(any(min(b*.1,d)>max(a*.1,c)+1e-7 for c,d in self.spoken))
 
     def test_search_expands_before_discarding_long_asmr(self):

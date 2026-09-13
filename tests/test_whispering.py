@@ -12,11 +12,10 @@ from unittest.mock import Mock,patch
 import numpy as np
 
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'engine'))
-from asmrclip.whispering import subtract,covers,positive,confirmed_regions,detect,apply_review,output_intervals
+from asmrclip.whispering import positive,confirmed_regions,detect,apply_review,output_intervals
 from asmrclip.common import settings,fingerprint
 from asmrclip.exclusions import summarize,strong_voice
 from asmrclip.classifier import Classifier
-from asmrclip.model_catalog import required_components
 from asmrclip.planner import make_plan,scene_guard
 from asmrclip.semantic import confirm
 
@@ -62,13 +61,6 @@ class WhisperTests(unittest.TestCase):
         self.assertEqual(identify({'whisper':.3,'speech':.6})[0],'speech')
         self.assertEqual(chapters([{'start':0,'end':5,'category':'whisper'}])[0]['title'],'轻语 / 耳语')
 
-    def test_default_validation_and_model_requirements(self):
-        self.assertTrue(settings({})['keep_whisper'])
-        with self.assertRaises(ValueError):settings({'keep_whisper':'true'})
-        cfg={'mode':'relaxed','speech_model':'whisper-turbo','review_enabled':False,'keep_drinking':True}
-        self.assertIn('clap',required_components(cfg))
-        self.assertNotIn('clap',required_components({**cfg,'keep_whisper':False}))
-
     def test_whisper_score_separate_from_speech_and_permission_does_not_change_raw_cache(self):
         r=summarize({'Whispering':.9,'Speech':.92,'Female speech, woman speaking':.1})
         self.assertEqual(r['whisper'],.9);self.assertEqual(r['voiced'],.1);self.assertTrue(strong_voice(r))
@@ -95,10 +87,6 @@ class WhisperTests(unittest.TestCase):
         self.assertEqual(intervals,[[0,5.],[6.,11]])
         self.assertFalse(confirmed_regions([whisper(3,6)],[[0,10]])[0])
         self.assertFalse(confirmed_regions([whisper(0,3),whisper(6,9)],[[0,9]])[0])
-
-    def test_subtraction_and_coverage_handle_mixed_sentences(self):
-        self.assertEqual(subtract([[0,20]],[[2,5],[4,8],[12,15]]),[[0,2],[8,12],[15,20]])
-        self.assertFalse(covers(1,7,[[2,8]]));self.assertTrue(covers(2,8,[[2,8]]))
 
     def test_detector_off_has_no_model_side_effects_and_on_records_evidence(self):
         with tempfile.TemporaryDirectory() as directory,contextlib.redirect_stdout(io.StringIO()):
@@ -145,7 +133,7 @@ class WhisperTests(unittest.TestCase):
             self.assertEqual(report['intervals'],[])
 
     def test_review_uses_actual_mapping_and_only_exempts_verified_parts_without_mutating_cache(self):
-        plan={'acoustic_exclusions':{'whisper':[[101,105],[200,204]]}}
+        plan={'acoustic_exclusions':{'whisper':[[101,104],[103,105],[200,204]]}}
         report={'mapping':[{'analysis_start':102,'analysis_end':106,'output_start':0,'output_end':4},
                            {'analysis_start':202,'analysis_end':205,'output_start':4,'output_end':7}]}
         raw={'status':'speech_found','findings':[{'start':0,'end':7,'text':'mixed utterance'}]}

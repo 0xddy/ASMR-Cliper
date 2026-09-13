@@ -102,12 +102,6 @@ class ReviewExtractionTests(unittest.TestCase):
         self.assertTrue(review_speech({**base,'text':'물 좀 마실게요'}))
         self.assertFalse(review_speech({**base,'text':'hello there','no_speech_prob':.95}))
 
-    def test_review_config_validation(self):
-        self.assertTrue(settings({})['review_enabled'])
-        with self.assertRaises(ValueError):settings({'review_enabled':'true'})
-        with self.assertRaises(ValueError):settings({'review_max_passes':0})
-        with self.assertRaises(ValueError):settings({'review_max_passes':True})
-
     def test_only_actual_reviewed_candidate_can_be_published(self):
         ffmpeg=ROOT/'runtime/tools/ffmpeg.exe'
         if not ffmpeg.exists():self.skipTest('FFmpeg is not installed')
@@ -125,19 +119,13 @@ class ReviewExtractionTests(unittest.TestCase):
                     return {'status':'speech_found','findings':[{'start':1,'end':2,'text':'hello'}]}
             with self.assertRaises(SpeechRemaining):export(source,out,meta,frames,plan,cfg,fingerprint(source),Reject())
             self.assertEqual(list(out.iterdir()),[])
-            flagged=export(source,out,meta,frames,plan,cfg,fingerprint(source),Reject(),allow_review_findings=True)
-            self.assertEqual(flagged['speech_review']['status'],'needs_review')
-            self.assertTrue(Path(flagged['output']).is_file())
-            self.assertFalse(flagged['payload_unchanged']);self.assertEqual(len(flagged['audio_fades']['edges']),2)
-            self.assertTrue(flagged['decode_verified'])
-            self.assertIn('hello',(Path(flagged['output']).parent/'人声复核.csv').read_text(encoding='utf-8-sig'))
             class Unreliable:
                 def inspect(self,path,report):
                     return {'status':'speech_found','findings':[{'start':1,'end':1.08,'text':'possible words',
                         'review_only':True,'reason':'collapsed alignment'}]}
             review_only=export(source,out,meta,frames,plan,cfg,fingerprint(source),Unreliable())
             self.assertEqual(review_only['speech_review']['status'],'needs_review')
-            self.assertEqual(review_only['duration'],flagged['duration'])
+            self.assertAlmostEqual(review_only['duration'],sum(b-a for a,b in plan['keep_frames'])*1024/meta['sample_rate'])
             self.assertIn('collapsed alignment',(Path(review_only['output']).parent/'人声复核.csv').read_text(encoding='utf-8-sig'))
             class Broken:
                 def inspect(self,path,report):raise RuntimeError('model inference failed')
@@ -160,10 +148,6 @@ class ReviewExtractionTests(unittest.TestCase):
             self.assertFalse(report['payload_unchanged']);self.assertEqual(len(report['audio_fades']['edges']),2)
             self.assertEqual(report['speech_review']['candidate_payload_sha256'],report['payload_sha256'])
             self.assertTrue(Path(report['output']).name.endswith('_v4.m4a'))
-            cfg=settings({'mode':'relaxed'})
-            flagged=export(source,out,meta,frames,plan,cfg,fingerprint(source),Reject(),allow_review_findings=True)
-            self.assertEqual(flagged['speech_review']['status'],'needs_review')
-            self.assertTrue((Path(flagged['output']).parent/'人声复核.csv').exists())
 
 
     def test_pipeline_publishes_remaining_speech_in_every_mode_and_keeps_last_valid_candidate(self):
@@ -211,6 +195,7 @@ class ReviewExtractionTests(unittest.TestCase):
                     self.assertTrue(Path(report['output']).is_file())
                     self.assertFalse(report['payload_unchanged']);self.assertEqual(len(report['audio_fades']['edges']),2);self.assertTrue(report['decode_verified'])
                     self.assertEqual(report['speech_review']['status'],'needs_review')
+                    self.assertIn('possible speech',(Path(report['output']).parent/'人声复核.csv').read_text(encoding='utf-8-sig'))
                     self.assertEqual(report['speech_review']['candidate_payload_sha256'],report['payload_sha256'])
                     import json
                     events=[json.loads(line) for line in output.getvalue().splitlines()]

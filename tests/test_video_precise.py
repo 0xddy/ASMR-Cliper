@@ -12,8 +12,7 @@ from asmrclip.media import source_intervals
 from asmrclip.reviewer import SpeechRemaining, decode_review_audio
 
 
-class PreciseVideoTests(unittest.TestCase):
-    setUp = test_media.MediaExportTests.setUp
+class PreciseVideoTests(test_media.MediaFixture,unittest.TestCase):
     source = test_media.MediaExportTests.source
     plan = test_media.MediaExportTests.plan
 
